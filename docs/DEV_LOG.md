@@ -237,3 +237,21 @@ pip install openpyxl pytest PySide6
 - capture_shifted(平移+旋转姿态): **3** 个区域,同样全部命中 → 对齐+差分全链路验证
 
 **下一阶段:** Phase 10 — SolderDefectDetector(圆度/长宽比/面积评分)。
+
+---
+
+## PHASE 10 COMPLETE — 锡珠/锡渣检测
+
+**完成内容:**
+- `src/solder/solder_detector.py`: SuspectedSolderDefect(type/x/y/w/h/area/aspect_ratio/
+  circularity/mean_gray/score),圆度=4πA/P²,几何过滤(min_area/max_area/min_circularity/
+  max_aspect_ratio),综合评分=面积0.4+圆度0.3+灰度差0.3
+- 生成器锡渣改为拉长不规则多边形(圆度0.6 vs 锡珠0.9),让几何分类真正被检验
+
+**测试结果(实测):**
+- capture_ok: 0 缺陷;capture_ng / capture_shifted: 各 3 缺陷
+- 分类: 2x suspected_solder_ball(circ 0.83-0.91) + 1x suspected_debris(circ 0.57-0.62, aspect 2.4-2.6),全部正确
+
+**发现的问题:** 初版合成锡渣近圆(circ 0.88)被误分为锡珠 -> 生成器修正为拉长多边形。
+
+**下一阶段:** Phase 11 — PySide6 GUI(offscreen 自动化验证)。

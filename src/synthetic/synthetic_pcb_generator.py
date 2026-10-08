@@ -168,12 +168,15 @@ class SyntheticPcbGenerator:
                 cv2.circle(img, (cx - r // 3, cy - r // 3), max(1, r // 3),
                            (240, 245, 250), -1)
             else:
-                # 锡渣: 不规则多边形暗斑
+                # 锡渣: 拉长的不规则多边形暗斑(圆度显著低于锡珠)
                 pts = []
-                for k in range(7):
-                    a = 2 * np.pi * k / 7
-                    rr = r * (0.5 + self.rng.random() * 0.8)
-                    pts.append((int(cx + rr * np.cos(a)), int(cy + rr * np.sin(a))))
+                n_v = 9
+                for k in range(n_v):
+                    a = 2 * np.pi * k / n_v
+                    rr = r * (0.3 + self.rng.random() * 1.2)
+                    # 沿 x 方向拉长 1.8 倍,模拟拖尾锡渣
+                    pts.append((int(cx + rr * 1.8 * np.cos(a)),
+                                int(cy + rr * 0.6 * np.sin(a))))
                 cv2.fillPoly(img, [np.array(pts, np.int32)], (120, 125, 115))
 
     # ---- 模拟拍摄 ------------------------------------------------------
