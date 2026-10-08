@@ -196,3 +196,21 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 无。
 
 **下一阶段:** Phase 8 — GoldenManager(create/load/save + metadata.json)。
+
+---
+
+## PHASE 8 COMPLETE — Golden Image
+
+**完成内容:**
+- `src/golden/golden_manager.py`: create_golden(拍摄图->自动/手动Mark->对齐->保存)、
+  save_golden/load_golden,存储 `data/golden/DEMO_PCB/golden.png` + metadata.json
+  (pcb_name/image_width/image_height/camera_index/timestamp/mark_points);尺寸校验
+
+**测试结果(实测):**
+- 自动 Mark 创建 Golden: 成功,metadata 完整;load_golden 回读 800x560
+- 手动 Mark 退化路径: 成功
+- 空图保存 -> GoldenImageError;100x100 尺寸不一致 -> GoldenImageError;已恢复正确 golden
+
+**发现的问题:** 无。
+
+**下一阶段:** Phase 9 — ImageDifferenceDetector(光照预处理+差分+形态学+连通域)。
