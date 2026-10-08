@@ -52,3 +52,27 @@ python --version            # 3.10.21
 pip install openpyxl pytest PySide6
 # 摄像头探测脚本: 遍历 index 0-3, 保存真实 frame
 ```
+
+---
+
+## PHASE 1 COMPLETE — 摄像头模块
+
+**完成内容:**
+- `config.yaml`(§二十八全部配置段)、`ConfigManager`(点号路径读取)
+- 结构化异常 `src/utils/exceptions.py`(§二十四 7 类)、日志 `src/utils/logger.py`(控制台+`logs/aoi.log`)
+- `src/utils/image_utils.py`(中文路径安全存图/灰度/亮度归一化/CLAHE)
+- `src/camera/camera.py`(Camera: open/read/capture_to/measure_fps,无效帧抛 CameraError)
+- `src/camera/camera_manager.py`(probe 0-3 / find_working_camera / create_camera_from_config)
+- `tools/camera_test.py` 交互预览(SPACE 拍照 / ESC 退出,叠加 index/分辨率/FPS)
+
+**运行命令:** `python -c "..."`(ConfigManager + Camera 真实打开拍照)
+
+**测试结果(实测):**
+- Camera opened: index=0, 1280x720 @30fps, 实测 ~10fps(前置摄像头 USB 带宽)
+- 保存 `data/captures/phase1_camera_test.jpg`(133814 bytes,目验为真实场景画面,非黑帧)
+
+**发现的问题:** git bash 中 `D:\...` 路径需写 `/d/...`;请求 1920x1080 不被支持,按 Phase 0 结论固定 1280x720。
+
+**解决方法:** 全部命令改用 git bash 路径;分辨率以实际稳定值为准写入 config.yaml。
+
+**下一阶段:** Phase 2 — MarkDetector(模板匹配+HoughCircles)+ synthetic_pcb_generator。
