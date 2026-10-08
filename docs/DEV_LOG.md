@@ -295,3 +295,23 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 无。
 
 **下一阶段:** Phase 13 — main.py CLI(--test/--synthetic-test/--create-golden/--camera) + 完整检测验收。
+
+---
+
+## PHASE 13 COMPLETE — 完整检测闭环 + CLI
+
+**完成内容:**
+- `main.py`: 5 个命令(--test / --synthetic-test / --create-golden [--source] / --camera-test / 默认 GUI + --camera)
+- InspectionEngine 输出目录同秒冲突修复(_2/_3 序号)
+- 端到端: capture_ok -> PASS(0 缺陷); capture_ng / capture_shifted -> NG(各 3 缺陷,分类正确)
+
+**运行命令与实测结果:**
+- `python main.py --synthetic-test`: 3/3 场景符合期望;每次检测落盘
+  output/<ts>/{original.jpg, aligned.jpg, mask.png, diff.png, overlay.jpg, result.json} 六件齐全
+- overlay 目验: 绿 ROI + 红缺陷框 + 顶部状态条正确;result.json 字段符合 §二十
+- `python main.py --camera-test`: 真实摄像头打开 1280x720@30,拍照保存,已释放
+- `python main.py --create-golden --source data/synthetic/capture_ok.jpg`: Golden 创建成功
+
+**发现的问题:** 同秒多次检测目录冲突 -> 序号后缀修复。
+
+**下一阶段:** Phase 14 — 代码整理;Phase 15 — README + 最终验收。

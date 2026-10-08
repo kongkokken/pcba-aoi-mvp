@@ -123,8 +123,14 @@ class InspectionEngine:
 
     # ---- 输出 -------------------------------------------------------------
     def _make_output_dir(self) -> Path:
-        out = ensure_dir(self.cfg.output_dir()
-                         / datetime.now().strftime("%Y%m%d_%H%M%S"))
+        """output/<YYYYMMDD_HHMMSS>/;同秒冲突时追加 _2/_3 序号。"""
+        base = self.cfg.output_dir() / datetime.now().strftime("%Y%m%d_%H%M%S")
+        out = base
+        n = 2
+        while out.exists():
+            out = base.with_name(f"{base.name}_{n}")
+            n += 1
+        ensure_dir(out)
         self.last_output_dir = out
         return out
 
