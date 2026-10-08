@@ -140,3 +140,23 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 无。
 
 **下一阶段:** Phase 5 — Excel 元件坐标(程序自动创建 pcb_config.xlsx 模板 + 加载校验)。
+
+---
+
+## PHASE 5 COMPLETE — Excel 元件坐标
+
+**完成内容:**
+- `src/coordinate/excel_manager.py`: create_template()(程序自动生成 `data/pcb_config.xlsx`,
+  Sheet=Components, 字段=任务书 §十一 全部 16 列) + load_components()(类型/空Ref/尺寸/重复Ref 校验,
+  失败抛 ExcelConfigError)
+- 模板行来自 `SYNTHETIC_COMPONENTS`(与合成板几何严格一致,坐标不写死在加载逻辑)
+
+**运行命令:** `python -c "(create_template + load_components + 失败路径)"`
+
+**测试结果(实测):**
+- 生成 6 行(R101/R102/C101/C102/U101/U102),加载回读字段全部正确
+- 缺文件/缺列均正确抛 ExcelConfigError
+
+**发现的问题:** 无。
+
+**下一阶段:** Phase 6 — ROI(旋转矩形 + boxPoints + 越界检查)。
