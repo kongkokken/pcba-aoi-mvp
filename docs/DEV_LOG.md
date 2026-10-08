@@ -328,3 +328,23 @@ pip install openpyxl pytest PySide6
 - 回归: pytest 33 passed
 
 **下一阶段:** Phase 15 — README + 最终验收(--test / --synthetic-test / --camera-test)。
+
+---
+
+## PHASE 15 COMPLETE — 最终交付验收
+
+**完成内容:**
+- `README.md`(§三十七 全部 17 节)
+- 最终验收三连(§三十八)全部实测通过:
+  1. `python main.py --test` → **33 passed in 1.02s**
+  2. `python main.py --synthetic-test` → capture_ok=PASS(0 缺陷), capture_ng=NG(3), capture_shifted=NG(3);
+     每次检测 output/<ts>/ 六件产物齐全(original/aligned/mask/diff/overlay/result.json)
+  3. `python main.py --camera-test` → 真实摄像头 index 0, 1280x720@30, 拍照保存并释放
+- GUI 默认入口 offscreen 启动验证通过(6 列异常表/按钮接线正常/自动关闭),无残留进程
+
+**§三十九 交付检查:** requirements.txt / README.md / config.yaml / main.py / src/ / tests/ / data/ / output/ 齐全;
+代码可运行、测试可运行、摄像头可运行、Synthetic Test 可运行、GUI 可启动、Golden 可创建、
+ROI/Mask/Difference 可生成、异常可标记、JSON 可输出。
+
+**声明:** 核心算法已通过 Synthetic Test,但真实 PCB 检测仍需要真实 PCB 图像/坐标/Mark 数据进行
+现场参数标定。本 MVP 未达到也不声称达到工业 AOI 精度。
