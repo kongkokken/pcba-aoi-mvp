@@ -178,3 +178,21 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 无。
 
 **下一阶段:** Phase 7 — Component Mask(Mask=1 元件 -> component_mask,检测区 = pcb_mask AND NOT component_mask)。
+
+---
+
+## PHASE 7 COMPLETE — Component Mask
+
+**完成内容:**
+- `src/mask/component_mask.py`: component_mask(Mask=1 元件 ROI 填充,支持额外外扩)、
+  detection_mask = pcb_mask AND NOT component_mask
+
+**测试结果(实测):**
+- component_mask 覆盖 3.7%,detection_mask 有效区 93.9%
+- 3 个合成缺陷(锡珠x2/锡渣x1)位置全部落在检测区内 ✅
+- 6 个元件中心全部被排除在检测区外 ✅
+- 输出 output/phase7_component_mask.png / phase7_detection_mask.png
+
+**发现的问题:** 无。
+
+**下一阶段:** Phase 8 — GoldenManager(create/load/save + metadata.json)。
