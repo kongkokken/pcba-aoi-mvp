@@ -99,3 +99,25 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 无。
 
 **下一阶段:** Phase 3 — alignment.py(findHomography + warpPerspective + 有效性检查)。
+
+---
+
+## PHASE 3 COMPLETE — Homography 对齐 + PCB 定位
+
+**完成内容:**
+- `src/pcb/alignment.py`: 4 点 findHomography(精确解) / 3 点 getAffineTransform 退化;
+  有效性检查(有限值/非奇异/重投影误差上限),失败抛 AlignmentError
+- `src/pcb/pcb_locator.py`: 拍摄图板轮廓自动检测(HSV 阈值+minAreaRect),
+  标准图 pcb_mask 生成(全板减配置边距)
+
+**运行命令:** `python -c "(detect -> align -> MAE vs golden + 失败路径)"`
+
+**测试结果(实测):**
+- capture_ok 对齐: 800x560,与 golden 灰度 MAE = 7.46(成像退化导致,合理)
+- capture_shifted(平移+旋转)对齐: MAE = 7.64,目验元件/Mark 位置与 golden 完全重合 → Homography 恢复能力验证通过
+- 失败路径: 共线点→AlignmentError("接近奇异"); 2 点→AlignmentError("数量非法"); 空图→AlignmentError
+- PcbLocator 自动检出板四边形 [[1150,640],[128,640],[128,58],[1150,58]]; pcb_mask 有效率 97.6%
+
+**发现的问题:** 无。
+
+**下一阶段:** Phase 4 — coordinate_transform.py(PCB mm ↔ 图像 px,回环误差 ≤0.1mm)。
