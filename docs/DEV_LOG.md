@@ -276,3 +276,22 @@ pip install openpyxl pytest PySide6
 - 修复: QHeaderWidget -> QHeaderView(导入错误)
 
 **下一阶段:** Phase 12 — pytest 测试套件(§二十六 10 项)。
+
+---
+
+## PHASE 12 COMPLETE — pytest 测试套件
+
+**完成内容:**
+- `tests/conftest.py`(cfg/合成数据/golden 会话级夹具)
+- `tests/test_camera.py`(帧有效性/错误路径/选择逻辑,9 项,不依赖真实硬件)
+- `tests/test_coordinate.py`(回环 ≤0.1mm/带旋转原点/批量一致性/Homography 链路,5 项)
+- `tests/test_roi.py`(ROI 生成/外扩/旋转/越界/裁剪/Mask/检测区/尺寸不符,10 项)
+- `tests/test_difference.py`(同图无差/空图/尺寸不一致/人为亮斑/Homography 三类失败/合成端到端,9 项)
+
+**运行命令:** `python -m pytest tests/ -v`
+
+**测试结果(实测): 33 passed in 0.87s** —— §二十六 10 项要求全覆盖。
+
+**发现的问题:** 无。
+
+**下一阶段:** Phase 13 — main.py CLI(--test/--synthetic-test/--create-golden/--camera) + 完整检测验收。
