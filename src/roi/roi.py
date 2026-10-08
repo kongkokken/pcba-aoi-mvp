@@ -10,8 +10,6 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from src.coordinate.coordinate_transform import CoordinateTransform
-from src.coordinate.excel_manager import Component
 from src.utils.exceptions import ROIError
 
 

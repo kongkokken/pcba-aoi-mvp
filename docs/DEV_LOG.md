@@ -315,3 +315,16 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 同秒多次检测目录冲突 -> 序号后缀修复。
 
 **下一阶段:** Phase 14 — 代码整理;Phase 15 — README + 最终验收。
+
+---
+
+## PHASE 14 COMPLETE — 代码整理
+
+**完成内容:**
+- compileall 全量语法检查通过
+- 无裸 except(§二十四 合规);src 内仅生成器 __main__ 有一处演示 print
+- 清理 src/roi/roi.py 未使用导入(CoordinateTransform/Component)
+- 补齐 §五 output/{pass,ng,diff,mask,overlay} 结构(.gitkeep);清理 output/ 调试期散图保留为阶段证据
+- 回归: pytest 33 passed
+
+**下一阶段:** Phase 15 — README + 最终验收(--test / --synthetic-test / --camera-test)。
