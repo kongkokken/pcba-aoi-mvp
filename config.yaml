@@ -47,8 +47,10 @@ difference:
   threshold: 30       # 差分二值化阈值
   min_area: 10        # 异常区域面积下限 (px^2)
   max_area: 5000      # 面积上限 (过滤大面积光照变化)
-  blur: 3
+  blur: 5             # 预处理高斯核(奇数;增大可抑制亚像素对齐残差)
   morphology: 3       # 形态学核大小
+  min_mean_diff: 25   # 区域平均差值下限(过滤边缘重影噪声,实测缺陷>=38)
+  edge_exclusion_px: 1  # golden 强边缘膨胀排除宽度(px),消除亚像素对齐残差重影;0=关闭
 
 solder:
   min_area: 10

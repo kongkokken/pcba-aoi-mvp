@@ -214,3 +214,26 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 无。
 
 **下一阶段:** Phase 9 — ImageDifferenceDetector(光照预处理+差分+形态学+连通域)。
+
+---
+
+## PHASE 9 COMPLETE — Image Difference(含光照预处理 §十七)
+
+**完成内容:**
+- `src/difference/image_difference.py`: 尺寸检查 -> 光照预处理(CLAHE可选/灰度域亮度归一化/高斯模糊)
+  -> absdiff -> threshold -> 形态学开+闭 -> 掩膜(pcb AND NOT component) -> golden边缘排除
+  -> 连通域 -> 面积/区域平均差值过滤 -> DiffRegion 列表
+- `MarkDetector` 增加亮斑质心亚像素精化(消除整像素匹配抖动导致的 warp 边缘重影)
+
+**调试过程(真实问题):**
+1. OK 图出现 12 个假区域 -> 根因: 模板匹配整像素位置在进程间抖动 -> 质心亚像素精化,两进程结果逐位一致
+2. NG 图 44 个假区域 -> 根因: normalize_brightness 在 BGR 彩色域取均值,与灰度目标均值量纲不一致
+   (实测自差均值 16.3 灰度级) -> 改为灰度域归一化
+3. 边缘排除最初同时排除 current 独有边缘,吃掉 r=4 小锡珠 -> 改为仅排除 golden 边缘(膨胀1px)
+
+**测试结果(实测):**
+- capture_ok(同姿态无缺陷): **0** 个区域(无误报)
+- capture_ng: **3** 个区域 = 3 个真实缺陷 (700,316)/(514,378)/(153,434),全部命中,无漏报无误报
+- capture_shifted(平移+旋转姿态): **3** 个区域,同样全部命中 → 对齐+差分全链路验证
+
+**下一阶段:** Phase 10 — SolderDefectDetector(圆度/长宽比/面积评分)。

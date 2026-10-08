@@ -68,11 +68,34 @@ class MarkDetector:
             hough_pts = self._detect_by_hough(gray)
             points = self._merge_points(points, hough_pts)
 
+        # 亚像素精化: 对粗定位中心做亮斑质心计算,消除整像素抖动
+        # (否则 ±1px 的匹配位置抖动会导致 warp 后高对比边缘出现差分重影)
+        for p in points:
+            p.x, p.y = self._refine_centroid(gray, p.x, p.y)
+
         self.validate(points, gray.shape)
         ordered = self.order_points(np.array([[p.x, p.y] for p in points]))
         logger.info("Mark detected: %d 个 -> %s", len(points),
                     np.round(ordered, 1).tolist())
         return ordered
+
+    @staticmethod
+    def _refine_centroid(gray: np.ndarray, x: float, y: float,
+                         win: int = 25) -> tuple[float, float]:
+        """在粗中心附近窗口内对亮斑(Mark 白圆)做质心精化,确定性亚像素。"""
+        h, w = gray.shape
+        half = win // 2
+        x0 = int(np.clip(round(x) - half, 0, max(0, w - win)))
+        y0 = int(np.clip(round(y) - half, 0, max(0, h - win)))
+        patch = gray[y0:y0 + win, x0:x0 + win]
+        if patch.size == 0:
+            return x, y
+        _, bw = cv2.threshold(patch, 0, 255,
+                              cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        m = cv2.moments(bw, binaryImage=True)
+        if m["m00"] < 10:  # 亮斑太小,放弃精化
+            return x, y
+        return x0 + m["m10"] / m["m00"], y0 + m["m01"] / m["m00"]
 
     # ---- 模板匹配 ------------------------------------------------------
     def _detect_by_template(self, gray: np.ndarray,
