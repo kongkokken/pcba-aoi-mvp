@@ -76,3 +76,26 @@ pip install openpyxl pytest PySide6
 **解决方法:** 全部命令改用 git bash 路径;分辨率以实际稳定值为准写入 config.yaml。
 
 **下一阶段:** Phase 2 — MarkDetector(模板匹配+HoughCircles)+ synthetic_pcb_generator。
+
+---
+
+## PHASE 2 COMPLETE — Mark 定位 + 合成 PCB 生成器
+
+**完成内容:**
+- `src/synthetic/synthetic_pcb_generator.py`: 标准板渲染(基材/走线/焊盘/丝印/R/C/IC/位号/4角Mark)、
+  模拟拍摄(透视变换+高斯模糊+噪声+亮度变化,default/shifted 两种姿态)、
+  缺陷变体(圆形亮斑=锡珠, 不规则斑块=锡渣,位于非元件区域)、Mark 模板自动裁剪
+- `src/pcb/mark_detector.py`: 模板匹配(多模板+NMS)主路径 + HoughCircles 备用路径;
+  合法性检查(数量/重复/共线/越界)失败抛 MarkDetectionError; 点集自动排序 TL/TR/BR/BL
+
+**运行命令:** `python -c "(SyntheticPcbGenerator.generate_all + MarkDetector.detect)"`
+
+**测试结果(实测):**
+- 生成 golden.png(800x560) / capture_ok.jpg / capture_ng.jpg / capture_shifted.jpg(1280x720) + 4 个 mark_template
+- capture_ok: 4 Mark 检出,与真值最大误差 **0.97 px**
+- capture_shifted(平移+旋转姿态): 4 Mark 检出,最大误差 **1.15 px**
+- 目验: 板面/元件/Mark/缺陷均正确渲染,缺陷位于非元件区域
+
+**发现的问题:** 无。
+
+**下一阶段:** Phase 3 — alignment.py(findHomography + warpPerspective + 有效性检查)。
