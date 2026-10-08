@@ -121,3 +121,22 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 无。
 
 **下一阶段:** Phase 4 — coordinate_transform.py(PCB mm ↔ 图像 px,回环误差 ≤0.1mm)。
+
+---
+
+## PHASE 4 COMPLETE — PCB 坐标系统
+
+**完成内容:**
+- `src/coordinate/coordinate_transform.py`: pcb_to_image / image_to_pcb(单点+批量),
+  支持原点偏移/比例尺/旋转/可选 Homography(拍摄图->标准图->mm 完整链路)
+
+**运行命令:** `python -c "(roundtrip tests)"`
+
+**测试结果(实测):**
+- 无旋转回环最大误差: 0.0 mm;带原点+3.5°旋转回环: 1.4e-14 mm(要求 ≤0.1 mm,余量巨大)
+- 批量接口与单点接口完全一致
+- Homography 链路: 拍摄图 Mark(203,123) -> PCB (6.00, 6.00) mm,正确
+
+**发现的问题:** 无。
+
+**下一阶段:** Phase 5 — Excel 元件坐标(程序自动创建 pcb_config.xlsx 模板 + 加载校验)。
