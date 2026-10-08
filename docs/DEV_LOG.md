@@ -160,3 +160,21 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 无。
 
 **下一阶段:** Phase 6 — ROI(旋转矩形 + boxPoints + 越界检查)。
+
+---
+
+## PHASE 6 COMPLETE — ROI
+
+**完成内容:**
+- `src/roi/roi.py`: Roi 旋转矩形(boxPoints 顶点/外接框/裁剪/包含测试/绘制)
+- `src/roi/roi_manager.py`: Excel 元件 -> ROI 批量生成,RoiExpand 外扩,越界裁剪,完全越界抛 ROIError
+
+**运行命令:** `python -c "(create_rois + draw_all + 越界/边缘用例)"`
+
+**测试结果(实测):**
+- 6 个 ROI 全部生成,目验 `output/phase6_rois.png`: 旋转框与元件本体/丝印精确对齐(90° 元件方向正确)
+- 完全越界元件(200,200)mm -> ROIError;边缘元件(99.5,69)mm -> 顶点裁剪后有效
+
+**发现的问题:** 无。
+
+**下一阶段:** Phase 7 — Component Mask(Mask=1 元件 -> component_mask,检测区 = pcb_mask AND NOT component_mask)。
