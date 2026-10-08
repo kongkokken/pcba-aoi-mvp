@@ -111,6 +111,29 @@ MVP 闭环稳定后,AI 仅用于: 未知元件/未知缺件/复杂缺陷/异常�
 按型号隔离: `config.yaml` 的 `pcb` 段 + `data/pcb_config.xlsx`(每型号一份) +
 `data/golden/<PCB_NAME>/` + `data/templates/`。GUI 顶部 PCB 型号切换为扩展点。
 
+## 18. Streamlit Cloud 部署
+
+仓库根目录自带 `streamlit_app.py`(Web 前端)与 `packages.txt`(OpenCV 需要的
+Debian 库: `libgl1` / `libglib2.0-0`),`requirements.txt` 已含 `streamlit>=1.35`。
+
+部署步骤:
+
+1. 打开 [share.streamlit.io](https://share.streamlit.io) → **New app**
+2. Repository: `kongkokken/pcba-aoi-mvp` → Branch: `main` →
+   Main file path: `streamlit_app.py`
+3. **Deploy**(packages.txt 已包含,无需额外配置)
+
+本地运行:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+Web 端功能: 合成演示(零硬件一键跑通 PASS/NG/NG)、浏览器摄像头 / 上传图片检测、
+Golden 管理(查看/上传良品板重建)、元件坐标表查看/下载/校验替换。
+注意: 云端摄像头走浏览器 `st.camera_input`(HTTPS 下可用),
+不使用 `cv2.VideoCapture`;文件系统为临时存储,重启后 output/ 清空。
+
 ---
 
 ## 测试与验收状态(本机实测)

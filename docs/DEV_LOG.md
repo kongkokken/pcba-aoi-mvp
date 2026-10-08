@@ -348,3 +348,36 @@ ROI/Mask/Difference 可生成、异常可标记、JSON 可输出。
 
 **声明:** 核心算法已通过 Synthetic Test,但真实 PCB 检测仍需要真实 PCB 图像/坐标/Mark 数据进行
 现场参数标定。本 MVP 未达到也不声称达到工业 AOI 精度。
+
+---
+
+## STREAMLIT WEB FRONT-END COMPLETE — Streamlit Cloud 前端
+
+**完成内容:**
+- `streamlit_app.py`(仓库根,Streamlit Cloud 入口): 四个 Tab ——
+  ① 合成演示(重新生成合成板 → 创建 Golden → ok/ng/shifted 三次检测,横幅+overlay+缺陷表+JSON 下载)
+  ② 实时检测(st.camera_input 浏览器摄像头 + 文件上传,真实流水线,结构化异常友好指引)
+  ③ Golden 管理(当前 golden + metadata 展示,上传良品板经引擎自动 Mark 流程创建/替换,失败如实提示手动 Mark 局限)
+  ④ 元件配置(Components 表 dataframe + 下载 + 上传替换,经 ExcelManager.load_components 校验)
+- 侧边栏: Season Group logo(brand/logo.webp)+ 标题 + PCB 型号 + camera/difference/solder 阈值摘要 + 最近输出目录
+- 品牌 CSS(coral #FB6362 / surface #343741);不 import src/gui(PySide6 仅桌面),不用 cv2.VideoCapture,
+  路径全部锚定 streamlit_app.py 所在目录
+- `packages.txt`(libgl1 / libglib2.0-0);requirements.txt 追加 streamlit>=1.35
+- README 增加「Streamlit Cloud 部署」章节(share.streamlit.io 部署步骤 + 本地运行命令)
+
+**运行命令与测试结果(实测):**
+- `python -m streamlit run streamlit_app.py --server.headless true --server.port 8550`
+  → 2 秒内 HTTP 200,/healthz 200;随后 taskkill 终止,netstat 确认端口释放,无残留 python 进程
+- 按四个 Tab 的代码路径直接驱动引擎(去掉 st 展示层):
+  Tab1: capture_ok=PASS(0) / capture_ng=NG(3) / capture_shifted=NG(3),overlay+result.json 均落盘
+  Tab2: 上传 capture_ng → NG 3;任意真实照片(无 Mark)→ ERROR,message="Mark 接近共线",触发 DEMO_PCB 指引
+  Tab3: golden 加载正常(metadata 六字段);无 Mark 照片创建 golden 被 GoldenImageError 拒绝且原 golden 完好
+  Tab4: xlsx 6 行 16 列读取正常;缺字段坏表被 ExcelConfigError 拒绝
+- 回归: `python main.py --test` → 33 passed
+
+**发现的问题:**
+1. 后台 kill 只杀掉了 launcher,Streamlit 子进程(PID 39180)仍占用 8550 → taskkill /PID /F /T 解决
+2. 侧边栏输出目录硬编码 "2026*" 前缀 → 改为按数字开头目录名过滤,与年份无关
+3. ERROR 结果初始走通用提示 → 按 message 中 "Mark" 关键字路由到 DEMO_PCB 专属指引
+
+**解决方法:** 见上。下一阶段: 推送到 GitHub 后在 share.streamlit.io 部署验证。
