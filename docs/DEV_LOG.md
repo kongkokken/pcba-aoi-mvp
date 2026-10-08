@@ -255,3 +255,24 @@ pip install openpyxl pytest PySide6
 **发现的问题:** 初版合成锡渣近圆(circ 0.88)被误分为锡珠 -> 生成器修正为拉长多边形。
 
 **下一阶段:** Phase 11 — PySide6 GUI(offscreen 自动化验证)。
+
+---
+
+## PHASE 11 COMPLETE — GUI (PySide6)
+
+**完成内容:**
+- `src/inspection/inspection_result.py`(§二十 InspectionResult/DefectRecord + JSON 序列化)
+- `src/inspection/ocr_engine.py`(§三十五 OcrEngine 预留接口 + PaddleOcrEngine 占位)
+- `src/inspection/inspection_engine.py`(完整检测流程 + overlay 绘制 + output/<ts>/ 产物保存,先行供 GUI 使用)
+- `src/gui/main_window.py`: 顶部 PCB型号/Camera/状态;左 Camera 右 Inspection 双视图;
+  底部 打开摄像头/拍照/创建Golden/开始检测/保存结果;PASS/NG 大字结果 + 异常表格;
+  Live 模式(QTimer 33ms)/Inspection 模式分离;closeEvent 释放摄像头
+- `tools/gui_smoke_test.py`: offscreen 自动化验证(注入合成 NG 帧 -> 检测 -> 断言)
+
+**运行命令:** `QT_QPA_PLATFORM=offscreen python tools/gui_smoke_test.py`
+
+**测试结果(实测):**
+- PASSED: NG / 3 缺陷 / 缺陷表 3 行 / 结果落盘 output/20261008_152945;无残留进程
+- 修复: QHeaderWidget -> QHeaderView(导入错误)
+
+**下一阶段:** Phase 12 — pytest 测试套件(§二十六 10 项)。
