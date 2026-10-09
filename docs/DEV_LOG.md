@@ -381,3 +381,33 @@ ROI/Mask/Difference 可生成、异常可标记、JSON 可输出。
 3. ERROR 结果初始走通用提示 → 按 message 中 "Mark" 关键字路由到 DEMO_PCB 专属指引
 
 **解决方法:** 见上。下一阶段: 推送到 GitHub 后在 share.streamlit.io 部署验证。
+
+---
+
+## PACKAGE A COMPLETE — 融合版 §8 标定 + §21 异常 + §24 配置 + §18 判定门控 + §19 结果
+
+**新增/修改文件:**
+- 新增 `src/calibration/calibration.py`: CalibrationManager(棋盘格角点检测/calibrateCamera/
+  JSON 参数保存加载/完整性与分辨率校验/initUndistortRectifyMap+remap 复用映射表/
+  RMS+每样本残差质量报告/条件变更提醒/identity_params 文档化豁免)
+- 新增 `src/calibration/synthetic_board.py`: 真值 K/dist 渲染多视角畸变棋盘格样本
+- `src/utils/exceptions.py`: +CalibrationError, +CoordinateConfigError(ExcelConfigError 改为其子类,向后兼容)
+- `config.yaml`: +calibration/coordinate/decision/mask/panel 组, alignment.use_ransac, roi.reject_out_of_bounds 等
+- `src/inspection/inspection_result.py`: +calibration_status/coordinate_mapping_status/config_versions/
+  review_reasons/result_grade=MVP_CANDIDATE; defect +board_id
+- `src/inspection/inspection_engine.py`: 标定校验+畸变校正为流水线第 0 级;判定门控 REVIEW>NG>PASS;
+  identity 豁免仅 source="synthetic" 可放行;产物扩展为 §19 全清单(undistorted/roi_overlay/三 mask/config_snapshot)
+- `src/golden/golden_manager.py`: metadata 增加 calibration/undistort_status/coordinate/transform/ROI/panel/creation_method
+- `src/pcb/alignment.py`: use_ransac 配置接线(>4 点 RANSAC)
+- `main.py`: ensure_synthetic_calibration + source 参数
+- 新增 `tests/test_calibration.py`(13 项)、`tests/test_inspection.py`(7 项)
+
+**运行命令:** `python -m pytest tests/ -q` → **53 passed**;`python main.py --synthetic-test` → PASS/NG/NG 保持绿色
+(calib=identity_skip, mapping=confirmed)
+
+**发现的问题:**
+1. OpenCV 5.0 cv2.norm 对 dtype 敏感 → 残差改 float64 numpy 计算
+2. 近正视合成标定视图焦距不可观测(fx 漂到 3 倍真值)→ 改为 cv2.projectPoints 真实 3D 姿态(±35° 离面旋转)
+3. 双重插值使合成样本 RMS≈1.9px → 测试阈值放宽至 3.0 并注明这是链路验证非度量学
+
+**下一阶段:** 包 B — 拼板分割 + 坐标空间 + ROI 升级 + Mask 三输出。
