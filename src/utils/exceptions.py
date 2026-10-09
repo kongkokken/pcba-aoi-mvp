@@ -13,6 +13,10 @@ class CameraError(AOIError):
     """摄像头打开 / 取流 / 拍照失败"""
 
 
+class CalibrationError(AOIError):
+    """相机标定失败 / 标定参数无效 / 分辨率不匹配 / 样本不足 (§8)"""
+
+
 class AlignmentError(AOIError):
     """Homography / 仿射对齐失败或结果无效"""
 
@@ -21,8 +25,12 @@ class MarkDetectionError(AOIError):
     """Mark 数量不足 / 重复 / 共线 / 坐标不合理"""
 
 
-class ExcelConfigError(AOIError):
-    """元件坐标 Excel 缺失 / 格式非法 / 字段错误"""
+class CoordinateConfigError(AOIError):
+    """坐标文件缺失 / 格式非法 / 字段映射错误 / 坐标语义未确认 (§10)"""
+
+
+class ExcelConfigError(CoordinateConfigError):
+    """Excel 坐标文件错误(向后兼容别名,语义并入 CoordinateConfigError)"""
 
 
 class ROIError(AOIError):

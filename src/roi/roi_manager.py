@@ -12,6 +12,9 @@ from src.utils.logger import get_logger
 
 logger = get_logger("roi_manager")
 
+# ROI 配置版本: ROI 生成策略/外扩语义变更时递增 (§14/§19)
+ROI_CONFIG_VERSION = "1.0"
+
 
 class RoiManager:
     def __init__(self, cfg: ConfigManager, transform: CoordinateTransform) -> None:

@@ -1,8 +1,17 @@
-"""统一检测引擎 (任务书 §十九 / Phase 13 核心,Phase 11 先行供 GUI 调用)。
+"""统一检测引擎 (融合版 §18/§19)。
 
-流程: capture -> Mark定位 -> 对齐 -> 坐标变换 -> ROI -> component mask
--> golden -> difference -> solder detector -> result
--> 保存 output/<YYYYMMDD_HHMMSS>/{original,aligned,mask,diff,overlay,result.json}
+流程: 采图/载入 -> 标定参数校验 -> 畸变校正 -> Mark 定位 -> 对齐
+-> 坐标变换 -> ROI -> Mask -> Golden -> 差分 -> 缺陷候选 -> 判定 -> 保存。
+
+判定门控(§18/§27.5):
+- decision.require_valid_calibration: 标定无效时不得输出 PASS
+  (identity 豁免仅当 source="synthetic" 且参数带文档化理由时视为可接受)
+- decision.require_valid_coordinate_mapping: 坐标语义未确认时不得 PASS
+- Golden 与当前条件不一致 -> REVIEW,绝不静默差分
+不确定时按 decision.uncertain_status(默认 REVIEW) 判定。
+
+产物(§19): original/undistorted/aligned/roi_overlay/pcb_mask/
+component_mask/valid_inspection_mask/diff/overlay/result.json/config_snapshot。
 """
 from __future__ import annotations
 
@@ -11,9 +20,12 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import yaml
 
+from src.calibration.calibration import CalibrationManager
 from src.config.config_manager import ConfigManager
-from src.coordinate.coordinate_transform import CoordinateTransform
+from src.coordinate.coordinate_transform import (MAPPING_VERSION,
+                                                 CoordinateTransform)
 from src.coordinate.excel_manager import ExcelManager
 from src.difference.image_difference import ImageDifferenceDetector
 from src.golden.golden_manager import GoldenManager
@@ -22,9 +34,9 @@ from src.mask.component_mask import ComponentMaskGenerator
 from src.pcb.alignment import Aligner
 from src.pcb.mark_detector import MarkDetector
 from src.pcb.pcb_locator import PcbLocator
-from src.roi.roi_manager import RoiManager
+from src.roi.roi_manager import ROI_CONFIG_VERSION, RoiManager
 from src.solder.solder_detector import SolderDefectDetector
-from src.utils.exceptions import AOIError
+from src.utils.exceptions import AOIError, CalibrationError
 from src.utils.image_utils import ensure_dir, save_image, to_gray
 from src.utils.logger import get_logger
 
@@ -32,14 +44,15 @@ logger = get_logger("inspection_engine")
 
 _COLOR_PASS = (0, 200, 0)
 _COLOR_NG = (0, 0, 230)
-_COLOR_WARN = (0, 200, 230)
+_COLOR_REVIEW = (0, 200, 230)   # 黄: WARNING/REVIEW (§19)
 
 
 class InspectionEngine:
-    """PCBA AOI 检测引擎(GUI 与 CLI 共用)。"""
+    """PCBA AOI 检测引擎(GUI / CLI / Streamlit 共用)。"""
 
     def __init__(self, cfg: ConfigManager) -> None:
         self.cfg = cfg
+        self.calibration = CalibrationManager(cfg)
         self.mark_detector = MarkDetector(cfg)
         self.aligner = Aligner(cfg)
         self.pcb_locator = PcbLocator(cfg)
@@ -49,13 +62,38 @@ class InspectionEngine:
         self.solder_detector = SolderDefectDetector(cfg)
         self.last_output_dir: Path | None = None
 
+    # ---- 标定检查 (§8/§18) ---------------------------------------------
+    def _check_calibration(self, image_size: tuple[int, int],
+                           source: str) -> tuple[str, dict | None, bool]:
+        """返回 (状态字符串, 参数或None, 是否满足放行门控)。"""
+        if not bool(self.cfg.get("calibration.enabled", True)):
+            reason = "calibration.enabled=false(配置显式关闭)"
+            logger.warning("跳过畸变校正: %s", reason)
+            return f"disabled", None, False
+        try:
+            params = self.calibration.load_params(image_size)
+        except CalibrationError as e:
+            logger.warning("标定参数不可用: %s —— 跳过畸变校正", e)
+            return f"invalid:{e}", None, False
+        for w in self.calibration.check_condition_change(params, image_size):
+            logger.warning("标定条件提醒: %s", w)
+        if params.get("is_identity"):
+            # identity 豁免: 仅合成来源可接受(§27.5 不得对真实相机放行)
+            ok = source == "synthetic"
+            status = "identity_skip"
+            logger.info("使用 identity 标定豁免(%s), source=%s, 放行门控=%s",
+                        params.get("notes", ""), source, ok)
+            return status, params, ok
+        return "valid", params, True
+
     # ---- 主流程 ---------------------------------------------------------
-    def inspect(self, capture_image: np.ndarray,
-                save_output: bool = True) -> InspectionResult:
-        """对一张拍摄图执行完整检测。任何 AOIError 都转化为 ERROR 结果。"""
+    def inspect(self, capture_image: np.ndarray, save_output: bool = True,
+                source: str = "generic") -> InspectionResult:
+        """对一张拍摄图执行完整检测。source: synthetic/camera/upload/generic。
+        任何 AOIError 都转化为 ERROR 结果,不崩溃。"""
         result = InspectionResult.now(str(self.cfg.get("pcb.name", "DEMO_PCB")))
         try:
-            self._run(capture_image, result, save_output)
+            self._run(capture_image, result, save_output, source)
         except AOIError as e:
             result.overall_status = "ERROR"
             result.message = str(e)
@@ -63,31 +101,63 @@ class InspectionEngine:
         return result
 
     def _run(self, capture_image: np.ndarray, result: InspectionResult,
-             save_output: bool) -> None:
+             save_output: bool, source: str) -> None:
+        if capture_image is None or capture_image.size == 0:
+            from src.utils.exceptions import InspectionError
+            raise InspectionError("输入图像为空")
+
+        # 0. 标定校验 + 畸变校正(§8: 必须在坐标映射与 ROI 之前)
+        img_size = (capture_image.shape[1], capture_image.shape[0])
+        calib_status, calib_params, calib_ok = self._check_calibration(
+            img_size, source)
+        result.calibration_status = calib_status
+        undistorted = (self.calibration.undistort(capture_image, calib_params)
+                       if calib_params is not None else capture_image)
+        if calib_params is None:
+            logger.warning("畸变校正跳过(无有效参数),后续模块使用原始图;"
+                           "Golden 与 Current 均未校正,约定一致")
+
         # 1. Mark 定位 + 对齐
-        marks = self.mark_detector.detect(capture_image)
+        marks = self.mark_detector.detect(undistorted)
         H = self.aligner.compute_transform(marks)
-        aligned = self.aligner.align_with_matrix(capture_image, H)
+        aligned = self.aligner.align_with_matrix(undistorted, H)
         result.alignment_status = "OK"
 
-        # 2. 坐标系 + ROI + Mask
+        # 2. 坐标映射状态(§10.2/§11)
+        confirmed = bool(self.cfg.get("coordinate.coordinate_meaning_confirmed",
+                                      False))
+        result.coordinate_mapping_status = "confirmed" if confirmed \
+            else "unconfirmed"
+
+        # 3. ROI + Mask
         transform = CoordinateTransform.from_config(self.cfg, homography=H)
         components = self.excel.load_components()
-        rois = RoiManager(self.cfg, transform).create_rois(components)
+        roi_mgr = RoiManager(self.cfg, transform)
+        rois = roi_mgr.create_rois(components)
         w, h = self.aligner.aligned_size
         mask_gen = ComponentMaskGenerator(w, h)
         component_mask = mask_gen.generate(rois)
         pcb_mask = self.pcb_locator.board_mask_aligned(w, h)
-        detection_mask = mask_gen.detection_mask(pcb_mask, component_mask)
+        valid_mask = mask_gen.detection_mask(pcb_mask, component_mask)
+        if int(valid_mask.sum()) == 0:
+            from src.utils.exceptions import InspectionError
+            raise InspectionError("有效检测 Mask 为空(元件掩膜覆盖了全部 PCB 区)")
 
-        # 3. Golden + 差分 + 缺陷检测
-        golden, _ = self.golden_mgr.load_golden()
+        # 4. Golden + 条件一致性检查(§14)
+        golden, golden_meta = self.golden_mgr.load_golden()
+        golden_calib = golden_meta.get("calibration", {})
+        condition_mismatch = (
+            bool(golden_calib) is False
+            or golden_calib.get("is_identity") != bool(
+                calib_params and calib_params.get("is_identity"))
+            or golden_meta.get("transform_version") != MAPPING_VERSION)
+
+        # 5. 差分 + 缺陷检测
         diff = self.diff_detector.compute(golden, aligned,
                                           component_mask, pcb_mask)
         defects = self.solder_detector.detect(diff, to_gray(aligned))
 
-        # 4. 结果汇总(元件级: 第一阶段元件区被 mask,全部记 PASS;
-        #    缺陷级: 非元件区疑似锡珠/锡渣)
+        # 6. 结果汇总
         inspected = [c for c in components if c.inspect]
         result.components_total = len(inspected)
         result.components_pass = len(inspected)
@@ -95,25 +165,57 @@ class InspectionEngine:
         result.solder_defect_count = len(defects)
         result.defects = [
             DefectRecord(
-                type=d.type, ref="", x=d.x, y=d.y, width=d.width,
-                height=d.height, area=d.area, score=d.score,
+                type=d.type, ref="", board_id="BOARD_1",
+                x=d.x, y=d.y, width=d.width, height=d.height,
+                area=d.area, score=d.score,
                 message=f"疑似{'锡珠' if 'ball' in d.type else '锡渣'} "
-                        f"@({d.x},{d.y})px 圆度={d.circularity}")
+                        f"@({d.x},{d.y})px 圆度={d.circularity}(候选排序分,非概率)")
             for d in defects
         ]
-        result.overall_status = "NG" if defects else "PASS"
+        result.config_versions = {
+            "config_file": self.cfg.config_path.name,
+            "mapping_version": MAPPING_VERSION,
+            "roi_config_version": ROI_CONFIG_VERSION,
+            "calibration": calib_status,
+            "coordinate_file": self.excel.path.name,
+        }
 
-        # 5. 输出产物
+        # 7. 判定门控(§18): REVIEW > NG > PASS
+        review: list[str] = []
+        if bool(self.cfg.get("decision.require_valid_calibration", True)) \
+                and not calib_ok:
+            review.append(f"无有效相机标定(状态: {calib_status})")
+        if bool(self.cfg.get("decision.require_valid_coordinate_mapping",
+                             True)) and not confirmed:
+            review.append("坐标语义未确认(CoordMeaningConfirmed=NO)")
+        if condition_mismatch:
+            review.append("Golden 与当前标定/变换条件不一致,应重建 Golden")
+        result.review_reasons = review
+        if review:
+            result.overall_status = str(
+                self.cfg.get("decision.uncertain_status", "REVIEW"))
+            result.message = "; ".join(review)
+            logger.warning("判定 REVIEW: %s", result.message)
+        else:
+            result.overall_status = "NG" if defects else "PASS"
+
+        # 8. 产物(§19)
         if save_output:
             out_dir = self._make_output_dir()
             result.output_dir = str(out_dir)
             overlay = self._draw_overlay(aligned, rois, defects,
                                          result.overall_status)
+            roi_overlay = roi_mgr.draw_all(aligned, rois)
             save_image(capture_image, out_dir / "original.jpg")
+            save_image(undistorted, out_dir / "undistorted.jpg")
             save_image(aligned, out_dir / "aligned.jpg")
-            save_image(detection_mask, out_dir / "mask.png")
+            save_image(roi_overlay, out_dir / "roi_overlay.jpg")
+            save_image(pcb_mask, out_dir / "pcb_mask.png")
+            save_image(component_mask, out_dir / "component_mask.png")
+            save_image(valid_mask, out_dir / "valid_inspection_mask.png")
             save_image(diff.diff_image, out_dir / "diff.png")
             save_image(overlay, out_dir / "overlay.jpg")
+            self._save_config_snapshot(out_dir, result)
             result.to_json(out_dir / "result.json")
             logger.info("Inspection finished: %s, defects=%d, output=%s",
                         result.overall_status, len(defects), out_dir)
@@ -134,21 +236,36 @@ class InspectionEngine:
         self.last_output_dir = out
         return out
 
+    def _save_config_snapshot(self, out_dir: Path,
+                              result: InspectionResult) -> None:
+        """本次检测的配置/参数快照(§19 可追溯)。"""
+        snapshot = {"config": self.cfg.as_dict(),
+                    "versions": result.config_versions,
+                    "calibration_status": result.calibration_status,
+                    "coordinate_mapping_status":
+                        result.coordinate_mapping_status}
+        (out_dir / "config_snapshot.yaml").write_text(
+            yaml.safe_dump(snapshot, allow_unicode=True, sort_keys=False),
+            encoding="utf-8")
+
     @staticmethod
     def _draw_overlay(aligned: np.ndarray, rois, defects,
                       status: str) -> np.ndarray:
-        """overlay: 绿=PASS ROI,红=NG 缺陷框,顶部状态条。"""
+        """overlay: 绿=PASS ROI,红=NG 缺陷框,黄=REVIEW,顶部状态条。"""
         out = aligned.copy()
         for roi in rois:
             roi.draw(out, _COLOR_PASS)
         for d in defects:
             cv2.rectangle(out, (d.x - 3, d.y - 3),
-                          (d.x + d.width + 3, d.y + d.height + 3), _COLOR_NG, 2)
+                          (d.x + d.width + 3, d.y + d.height + 3),
+                          _COLOR_NG, 2)
             cv2.putText(out, d.type.replace("suspected_", ""),
                         (d.x, max(12, d.y - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, _COLOR_NG, 1)
-        color = _COLOR_PASS if status == "PASS" else _COLOR_NG
+        color = {"PASS": _COLOR_PASS, "NG": _COLOR_NG}.get(
+            status, _COLOR_REVIEW)
         cv2.rectangle(out, (0, 0), (out.shape[1], 26), (30, 30, 30), -1)
-        cv2.putText(out, f"AOI RESULT: {status}  defects={len(defects)}",
+        cv2.putText(out, f"AOI RESULT: {status} (MVP候选)  "
+                    f"defects={len(defects)}",
                     (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
         return out

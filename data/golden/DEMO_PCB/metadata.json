@@ -3,7 +3,27 @@
   "image_width": 800,
   "image_height": 560,
   "camera_index": 0,
-  "timestamp": "2026-10-08T16:31:32",
+  "timestamp": "2026-10-09T14:03:24",
+  "calibration": {
+    "present": true,
+    "valid": true,
+    "is_identity": true,
+    "rms_reprojection_error": 0.0,
+    "format_version": "1.0",
+    "parameter_file": "camera_calibration.json",
+    "notes": "合成演示图像由渲染器生成,无镜头畸变(§8 文档化豁免);真实相机必须执行实体标定板标定"
+  },
+  "undistort_status": "identity_skip",
+  "coordinate_file": "pcb_config.xlsx",
+  "coordinate_meaning_confirmed": true,
+  "transform_version": "1.0",
+  "roi_config_version": "1.0",
+  "panel_config": {
+    "mode": "single",
+    "rows": 1,
+    "cols": 1
+  },
+  "creation_method": "auto_mark",
   "mark_points": [
     [
       203.3,

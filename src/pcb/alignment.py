@@ -44,7 +44,10 @@ class Aligner:
         dst = self.canonical_marks[:len(src)]
 
         if len(src) >= 4 and self.method == "homography":
-            H, mask = cv2.findHomography(src, dst, method=0)  # 4点精确解
+            # >4 点且配置启用时使用 RANSAC 鲁棒估计 (§9.3);恰好 4 点用精确解
+            use_ransac = bool(self.cfg.get("alignment.use_ransac", True))
+            method = cv2.RANSAC if (use_ransac and len(src) > 4) else 0
+            H, mask = cv2.findHomography(src, dst, method=method)
             if H is None:
                 raise AlignmentError("findHomography 返回 None(点可能共线/退化)")
             self._validate(H, src, dst)

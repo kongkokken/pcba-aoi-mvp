@@ -31,12 +31,32 @@ def cmd_test() -> int:
         cwd=PROJECT_ROOT).returncode
 
 
+def ensure_synthetic_calibration(cfg: ConfigManager) -> None:
+    """合成演示的标定豁免(§8): 合成图像按构造无镜头畸变,
+    生成带文档化理由的 identity 参数。仅对 source="synthetic" 放行。"""
+    from src.calibration.calibration import CalibrationManager
+    cm = CalibrationManager(cfg)
+    if cm.exists():
+        return
+    cam_w = int(cfg.get("camera.width", 1280))
+    cam_h = int(cfg.get("camera.height", 720))
+    params = CalibrationManager.identity_params(
+        cam_w, cam_h,
+        reason="合成演示图像由渲染器生成,无镜头畸变(§8 文档化豁免);"
+               "真实相机必须执行实体标定板标定")
+    cm.save_params(params)
+    logger.info("identity 标定豁免已生成: %s", cm.param_path)
+
+
 def cmd_synthetic_test(cfg: ConfigManager) -> int:
-    """合成 PCB 全流程: 生成 -> golden -> OK/NG/shifted 三次检测。"""
+    """合成 PCB 全流程: 标定豁免 -> 生成 -> golden -> OK/NG/shifted 三次检测。"""
     from src.golden.golden_manager import GoldenManager
     from src.inspection.inspection_engine import InspectionEngine
     from src.synthetic.synthetic_pcb_generator import SyntheticPcbGenerator
     from src.utils.image_utils import load_image
+
+    print("=== Synthetic Test: identity 标定豁免(合成图无畸变) ===")
+    ensure_synthetic_calibration(cfg)
 
     print("=== Synthetic Test: 生成合成 PCB 图像集 ===")
     syn = SyntheticPcbGenerator(cfg).generate_all()
@@ -52,14 +72,17 @@ def cmd_synthetic_test(cfg: ConfigManager) -> int:
     ok = True
     for name, want in expected.items():
         img = load_image(cfg.data_dir() / "synthetic" / f"{name}.jpg")
-        result = engine.inspect(img, save_output=True)
+        result = engine.inspect(img, save_output=True, source="synthetic")
         got = result.overall_status
         mark = "✓" if got == want else "✗"
         print(f"[{mark}] {name}: {got} (期望 {want}), "
-              f"defects={result.solder_defect_count}, output={result.output_dir}")
+              f"defects={result.solder_defect_count}, "
+              f"calib={result.calibration_status}, "
+              f"mapping={result.coordinate_mapping_status}, "
+              f"output={result.output_dir}")
         for d in result.defects:
-            print(f"      {d.type} @({d.x},{d.y}) {d.width}x{d.height} "
-                  f"area={d.area} score={d.score}")
+            print(f"      {d.type} [{d.board_id}] @({d.x},{d.y}) "
+                  f"{d.width}x{d.height} area={d.area} score={d.score}")
         ok = ok and (got == want)
     print("=== Synthetic Test", "通过 ===" if ok else "存在不符 ===")
     return 0 if ok else 1

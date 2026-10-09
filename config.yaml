@@ -35,6 +35,49 @@ alignment:
   method: homography  # homography(4点) / affine(3点)
   mark_threshold: 0.8
   reproj_error_max: 10.0  # Homography 重投影误差上限 (px)
+  use_ransac: true        # 点数>4 时使用 RANSAC 鲁棒估计 (§9.3)
+
+calibration:
+  enabled: true
+  parameter_file: "data/calibration/camera_calibration.json"
+  require_resolution_match: true
+  allow_skip_only_if_validated: true  # 跳过标定必须有记录理由 (§8)
+  min_samples: 5            # 标定样本下限,不得仅凭单张图声称可靠
+  board:                    # 标定板信息(棋盘格内角点布局)
+    type: chessboard
+    rows: 6                 # 内角点行数
+    cols: 9                 # 内角点列数
+    square_size: 25.0
+    unit: mm
+
+coordinate:
+  unit: mm
+  # DEMO_PCB 为自建合成板,坐标语义(绝对坐标/mm/左上原点/Y向下)由生成器定义,已确认;
+  # 接入真实坐标报告时必须置 false,直到逐字段确认 (§10.2)
+  coordinate_meaning_confirmed: true
+  default_roundtrip_tolerance_mm: 0.1   # 初始软件测试目标,非产线保证值 (§11.1)
+
+decision:
+  uncertain_status: REVIEW      # 不确定时的判定 (§18)
+  require_valid_calibration: true           # 无有效标定(或文档化豁免)时不得 PASS
+  require_valid_coordinate_mapping: true    # 坐标语义未确认时不得 PASS
+
+mask:
+  polarity: 255   # 极性约定: 255=该区域有效/为真, 0=屏蔽 (§13)
+
+panel:
+  mode: single    # single / grid / auto (§9.1); DEMO_PCB 为单板
+  rows: 1
+  cols: 1
+  spacing_x_mm: 0.0
+  spacing_y_mm: 0.0
+  rotation_deg: 0.0
+  numbering: row_major   # row_major: BOARD_1..N 从左到右、从上到下
+
+roi:
+  default_expand: 0.2     # ROI 默认外扩比例(比例单位,非像素/mm,§12.4)
+  reject_out_of_bounds: true   # 完全越界 ROI 拒绝而非裁剪
+  overlap_warn_percent: 30     # 两 ROI 重叠面积占比超过该值则警告
 
 illumination:
   blur: 3                 # 高斯模糊核 (奇数)
@@ -57,9 +100,6 @@ solder:
   max_area: 5000
   min_circularity: 0.2    # 圆度 4πA/P² 下限
   max_aspect_ratio: 8.0   # 长宽比上限
-
-roi:
-  default_expand: 0.2     # ROI 默认外扩比例
 
 golden:
   dir_name: golden    # data/golden/<pcb_name>/golden.png

@@ -44,6 +44,10 @@ class ConfigManager:
             raise KeyError(f"配置缺失: {key_path} ({self.config_path})")
         return value
 
+    def as_dict(self) -> dict[str, Any]:
+        """返回完整配置字典(用于结果快照,§19 配置版本追溯)。"""
+        return dict(self._data)
+
     @property
     def root(self) -> Path:
         return PROJECT_ROOT

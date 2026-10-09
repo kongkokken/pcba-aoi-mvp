@@ -14,6 +14,9 @@ import numpy as np
 
 from src.config.config_manager import ConfigManager
 
+# 坐标映射参数版本: 映射模型/参数结构变更时递增,与 Golden/ROI/结果关联 (§11)
+MAPPING_VERSION = "1.0"
+
 
 class CoordinateTransform:
     """PCB mm 坐标与对齐图像像素坐标的双向转换。"""
