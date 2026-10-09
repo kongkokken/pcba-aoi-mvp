@@ -45,6 +45,10 @@ st.markdown(
         background:#8a6d1a; color:#fff; padding:14px 20px; border-radius:8px;
         font-size:18px; font-weight:600;
     }
+    .verdict-review {
+        background:#b8860b; color:#fff; padding:14px 20px; border-radius:8px;
+        font-size:20px; font-weight:700; text-align:center;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -64,6 +68,23 @@ from src.synthetic.synthetic_pcb_generator import SyntheticPcbGenerator  # noqa:
 from src.utils.exceptions import (AOIError, GoldenImageError,  # noqa: E402
                                   MarkDetectionError)
 from src.utils.image_utils import load_image  # noqa: E402
+from main import ensure_synthetic_calibration  # noqa: E402
+
+
+def calibration_status_text(cfg: ConfigManager) -> str:
+    """标定状态摘要(§8): valid / identity_skip(合成豁免) / invalid。"""
+    from src.calibration.calibration import CalibrationManager
+    from src.utils.exceptions import CalibrationError
+    cm = CalibrationManager(cfg)
+    try:
+        size = (int(cfg.get("camera.width", 1280)),
+                int(cfg.get("camera.height", 720)))
+        params = cm.load_params(size)
+    except CalibrationError:
+        return "❌ 无有效标定(真实来源将判 REVIEW)"
+    if params.get("is_identity"):
+        return "🟡 identity 豁免(仅合成演示可放行)"
+    return f"✅ 有效(RMS={params.get('rms', 0):.3f}px)"
 
 
 # ---- 通用辅助 ---------------------------------------------------------------
@@ -86,7 +107,7 @@ def show_bgr(img: np.ndarray, **kwargs) -> None:
 
 
 def verdict_banner(result: InspectionResult, label: str = "") -> None:
-    """PASS 绿 / NG 红 / ERROR 黄 横幅。"""
+    """PASS 绿 / NG 红 / REVIEW 琥珀 / ERROR 黄 横幅(§18 判定等级)。"""
     prefix = f"{label} · " if label else ""
     if result.overall_status == "PASS":
         st.markdown(f'<div class="verdict-pass">✅ {prefix}PASS — '
@@ -95,28 +116,58 @@ def verdict_banner(result: InspectionResult, label: str = "") -> None:
         st.markdown(f'<div class="verdict-ng">❌ {prefix}NG — 检出 '
                     f'{result.solder_defect_count} 个疑似缺陷</div>',
                     unsafe_allow_html=True)
+    elif result.overall_status == "REVIEW":
+        st.markdown(f'<div class="verdict-review">🔶 {prefix}REVIEW — '
+                    f'需人工复核({len(result.review_reasons)} 项原因)</div>',
+                    unsafe_allow_html=True)
+        for reason in result.review_reasons:
+            st.warning(f"复核原因: {reason}")
     else:
         st.markdown(f'<div class="verdict-err">⚠️ {prefix}ERROR — '
                     f'{result.message}</div>', unsafe_allow_html=True)
 
 
+# §19 产物清单(可在结果区切换查看)
+ARTIFACT_CHOICES = {
+    "overlay.jpg": "检测叠加图(绿=元件ROI, 红=缺陷框)",
+    "roi_overlay.jpg": "ROI 核对图(拼板边界+状态着色)",
+    "masks_color.png": "Mask 彩色可视化(绿=检测区/红=元件/灰=板外)",
+    "undistorted.jpg": "畸变校正图",
+    "aligned.jpg": "对齐图",
+    "diff.png": "差分图",
+    "original.jpg": "原始拍摄图",
+}
+
+
 def show_result(result: InspectionResult, label: str) -> None:
-    """一次检测的完整展示: 横幅 + overlay + 缺陷表 + JSON 下载。"""
+    """一次检测的完整展示: 横幅 + 复核原因 + 产物切换 + 缺陷表 + JSON 下载。"""
     verdict_banner(result, label)
     if result.overall_status == "ERROR" or not result.output_dir:
         return
-    overlay_path = Path(result.output_dir) / "overlay.jpg"
-    if overlay_path.exists():
-        show_bgr(load_image(overlay_path),
-                 caption=f"overlay(绿=元件ROI, 红=缺陷框) — {Path(result.output_dir).name}")
+    out = Path(result.output_dir)
+    st.caption(f"标定: `{result.calibration_status}` · "
+               f"坐标映射: `{result.coordinate_mapping_status}` · "
+               f"结果等级: `{result.result_grade}`")
+    artifact = st.selectbox(
+        "查看产物", list(ARTIFACT_CHOICES),
+        format_func=lambda n: f"{n} — {ARTIFACT_CHOICES[n]}",
+        key=f"artifact_{label}_{result.timestamp}")
+    apath = out / artifact
+    if apath.exists():
+        img = cv2.imdecode(np.fromfile(str(apath), np.uint8),
+                           cv2.IMREAD_UNCHANGED)
+        if img is not None:
+            if img.ndim == 2:
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            show_bgr(img, caption=f"{artifact} — {out.name}")
     if result.defects:
         st.dataframe(pd.DataFrame([asdict(d) for d in result.defects]),
                      use_container_width=True)
-    json_path = Path(result.output_dir) / "result.json"
+    json_path = out / "result.json"
     if json_path.exists():
         st.download_button(f"⬇️ 下载 result.json({label})",
                            data=json_path.read_bytes(),
-                           file_name=f"result_{Path(result.output_dir).name}.json",
+                           file_name=f"result_{out.name}.json",
                            mime="application/json",
                            key=f"dl_{label}_{result.timestamp}")
 
@@ -154,6 +205,12 @@ with st.sidebar:
     st.caption(f"Solder: circularity≥{cfg.get('solder.min_circularity')} · "
                f"aspect≤{cfg.get('solder.max_aspect_ratio')}")
     st.divider()
+    st.subheader("判定门控状态(§18)")
+    st.caption(f"标定: {calibration_status_text(cfg)}")
+    coord_ok = bool(cfg.get("coordinate.coordinate_meaning_confirmed", False))
+    st.caption(f"坐标语义: {'✅ 已确认' if coord_ok else '🔶 未确认(判 REVIEW)'}")
+    st.caption(f"拼板模式: `{cfg.get('panel.mode', 'single')}`")
+    st.divider()
     st.subheader("最近检测输出")
     out_root = cfg.output_dir()
     runs = sorted((d for d in out_root.iterdir()
@@ -181,6 +238,8 @@ with tab_demo:
         try:
             with st.spinner("生成合成 PCB 图像集..."):
                 syn = SyntheticPcbGenerator(cfg).generate_all()
+            # 合成演示的 identity 标定豁免(§8 文档化;仅 source="synthetic" 放行)
+            ensure_synthetic_calibration(cfg)
             with st.spinner("创建 Golden(自动 Mark 定位 + 对齐)..."):
                 gm = GoldenManager(cfg)
                 gm.create_golden(load_image(syn.capture_ok),
@@ -190,7 +249,8 @@ with tab_demo:
                      ("capture_shifted", "NG")]
             for name, want in cases:
                 img = load_image(ROOT / "data" / "synthetic" / f"{name}.jpg")
-                result = engine.inspect(img, save_output=True)
+                result = engine.inspect(img, save_output=True,
+                                        source="synthetic")
                 ok = result.overall_status == want
                 st.divider()
                 st.subheader(f"{'✅' if ok else '⚠️'} {name} "
@@ -219,9 +279,12 @@ with tab_live:
             show_bgr(img, caption="输入图像", width=420)
             if st.button("🔍 开始检测", type="primary", key="run_live"):
                 try:
+                    # 来源如实声明(§27.5): identity 标定豁免对真实来源不放行,
+                    # 未完成实体标定前判定为 REVIEW 属预期行为
+                    src_kind = "camera" if shot is not None else "upload"
                     with st.spinner("Mark 定位 → 对齐 → 差分 → 缺陷检测..."):
-                        result = InspectionEngine(cfg).inspect(img,
-                                                               save_output=True)
+                        result = InspectionEngine(cfg).inspect(
+                            img, save_output=True, source=src_kind)
                     show_result(result, "live")
                     if result.overall_status == "ERROR":
                         # 引擎把结构化异常收敛进 message;按类型给出指引
@@ -271,6 +334,10 @@ with tab_golden:
 with tab_excel:
     em = ExcelManager(cfg)
     st.subheader("元件坐标表(data/pcb_config.xlsx · Components)")
+    st.caption("§10.2 语义门控: `CoordinateMeaningConfirmed=NO` 的元件"
+               "将标 UNCONFIGURED,不参与最终 ROI 定位;"
+               "字段映射见 config.yaml `coordinate_import.field_mapping`。"
+               "支持上传 .xlsx/.xls/.csv。")
     if not em.path.exists():
         em.create_template()
     df = pd.read_excel(em.path, sheet_name="Components")
@@ -280,23 +347,31 @@ with tab_excel:
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     st.subheader("上传替换元件表")
-    xlsx_up = st.file_uploader("替换 xlsx(字段需与模板一致)",
-                               type=["xlsx"], key="excel_upload")
+    xlsx_up = st.file_uploader("替换坐标表(基础 16 字段必需,扩展字段可选)",
+                               type=["xlsx", "xls", "csv"], key="excel_upload")
     if xlsx_up is not None and st.button("校验并替换", key="replace_excel"):
-        tmp = ROOT / "data" / "_upload_tmp.xlsx"
+        suffix = Path(xlsx_up.name).suffix
+        tmp = ROOT / "data" / f"_upload_tmp{suffix}"
         tmp.write_bytes(xlsx_up.getvalue())
         try:
             comps = em.load_components(tmp)  # 用引擎自带加载器校验
             import shutil
-            shutil.copy(tmp, em.path)
-            st.success(f"校验通过,已替换: {len(comps)} 个元件 "
-                       f"({', '.join(c.ref for c in comps)})")
-            st.rerun()
+            if suffix == ".csv":
+                # CSV 不直接替换 xlsx 模板,仅校验并提示
+                st.info(f"CSV 校验通过({len(comps)} 个元件),"
+                        "请转存为 xlsx 后替换,或直接替换 data/ 下文件。")
+            else:
+                shutil.copy(tmp, em.path)
+                st.success(f"校验通过,已替换: {len(comps)} 个元件 "
+                           f"({', '.join(c.ref for c in comps)})")
+                st.rerun()
         except AOIError as e:
             st.error(f"校验失败,未替换: {e}")
         finally:
             tmp.unlink(missing_ok=True)
 
 st.divider()
-st.caption("SG-AOI · PCBA AOI MVP — 第一阶段: 无深度学习;"
-           "核心算法经 Synthetic Test 验证,真实 PCB 需现场标定 Mark/Golden/坐标。")
+st.caption("SG-AOI · PCBA AOI MVP — 结果均为 MVP 候选(result_grade=MVP_CANDIDATE);"
+           "判定等级 PASS/NG/REVIEW,不确定时一律 REVIEW(§18)。"
+           "核心算法经 Synthetic Test 验证;真实 PCB 需实体标定板标定、"
+           "Mark/Golden/坐标语义现场确认后方可放行。")

@@ -485,3 +485,40 @@ PASS/NG/NG 保持绿色
 真实客户列名/字段映射/语义确认未经真实文件验证。
 
 **下一阶段:** 包 D — Golden 元数据核对 + GUI/streamlit REVIEW 展示 + 五级测试文档。
+
+---
+
+## PACKAGE D COMPLETE — 融合版 §14 元数据核对 + §20 GUI + Streamlit + 五级文档
+
+**新增/修改文件:**
+- `src/gui/main_window.py`: 顶部标定/坐标映射状态显示(§8/§10.2 门控来源可见);
+  判定色 PASS 绿/NG 红/REVIEW 琥珀/ERROR 灰;异常表 8 列(+BoardID/Message);
+  产物下拉切换(overlay/aligned/undistorted/roi_overlay/masks_color/diff/original);
+  +frame_source 属性(摄像头取帧=camera,测试注入由调用方如实声明)
+- `streamlit_app.py`: +.verdict-review 琥珀横幅(逐条列出 review_reasons);
+  show_result 产物 selectbox + 标定/映射/result_grade 状态行;合成演示先
+  ensure_synthetic_calibration 并以 source="synthetic" 运行;实时检测按
+  camera/upload 如实声明来源(identity 下判 REVIEW 属预期);侧边栏 +判定门控状态
+  (标定/坐标语义/拼板模式);元件配置页支持 xlsx/xls/csv 校验替换并说明语义门控
+- `tools/gui_smoke_test.py`: 注入帧声明 frame_source="synthetic";
+  +REVIEW 门控场景(同一帧伪装 camera 来源必须 REVIEW 且有理由)
+- `README.md`: §6 坐标配置表(扩展字段/语义门控/字段映射)、§8 Golden 元数据 +
+  8.1 标定 + 8.2 判定门控 + 8.3 拼板、§11 十二件产物、五级测试验收表(§23)
+- Golden 元数据(§14)在包 A 已落地,本包核对: calibration 快照/undistort_status/
+  transform_version/roi_config_version/panel_config/creation_method 齐全 ✅
+
+**运行命令:** `python main.py --test` → **87 passed**;`--synthetic-test` → PASS/NG/NG;
+`--camera-test` → 真实摄像头 1280x720 取流/拍照/释放通过;
+GUI 离屏冒烟双场景(NG 检出 + REVIEW 门控)通过;
+streamlit 8550 端口启动 HTTP 200,验证后按 LISTENING PID taskkill /F /T,无残留。
+
+**发现的问题:**
+1. GUI/Streamlit 调引擎时来源必须显式传递 —— 旧调用走默认 "generic" 会在
+   identity 标定下全部判 REVIEW;已改为各入口如实声明 source
+2. GUI 冒烟测试原断言 NG 会在新门控下失败 → 注入帧声明 synthetic 来源,
+   并新增 camera 来源 REVIEW 断言(门控本身纳入冒烟覆盖)
+
+**五级验证结论(§23):** 单元 ✅87 / 合成 ✅3/3 / GUI 冒烟 ✅ / 真实摄像头 ✅取流
+(实体标定板 PENDING) / 真实样本 ⛔BLOCKED(Abus 图片与 Report xls 未提供,§27.9)。
+
+**下一阶段:** 最终验收三连 + 提交 + 交付报告(不 push,由父代理负责)。

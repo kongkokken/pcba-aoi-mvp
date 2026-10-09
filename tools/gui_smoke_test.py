@@ -24,8 +24,10 @@ def main() -> int:
     cfg = ConfigManager()
     win = MainWindow(cfg)
 
-    # 注入合成 NG 帧(代替摄像头)
+    # 注入合成 NG 帧(代替摄像头);来源必须如实声明为 synthetic
+    # (identity 标定豁免仅对合成来源放行, §27.5)
     win.last_frame = load_image(cfg.data_dir() / "synthetic" / "capture_ng.jpg")
+    win.frame_source = "synthetic"
 
     def scenario() -> None:
         win.on_inspect()  # 触发完整检测
@@ -35,9 +37,22 @@ def main() -> int:
         assert r.solder_defect_count == 3, f"期望 3 缺陷, 实际 {r.solder_defect_count}"
         assert win.defect_table.rowCount() == 3
         assert "NG" in win.result_label.text()
+        # 产物切换: roi_overlay / masks_color 可加载
+        for artifact in ["roi_overlay.jpg", "masks_color.png", "diff.png"]:
+            win.artifact_combo.setCurrentText(artifact)
         win.on_save_result()
         print("GUI smoke test PASSED:",
               r.overall_status, r.solder_defect_count, r.output_dir)
+
+        # REVIEW 门控场景: 同一帧伪装成相机来源,identity 标定不得放行 (§27.5)
+        win.frame_source = "camera"
+        win.on_inspect()
+        r2 = win.last_result
+        assert r2.overall_status == "REVIEW", \
+            f"相机来源+identity 标定应 REVIEW, 实际 {r2.overall_status}"
+        assert "REVIEW" in win.result_label.text()
+        assert r2.review_reasons, "REVIEW 必须给出理由"
+        print("GUI REVIEW gating PASSED:", r2.review_reasons[0])
         win.close()
         app.quit()
 

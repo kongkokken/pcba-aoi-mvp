@@ -37,12 +37,28 @@ python main.py --camera-test    # headless 摄像头链路验证
 `config.yaml` 的 `camera` 段: `index / width / height / fps / backend / warmup_frames`。
 本机实测仅 index 0 可用;请求 1920x1080 不被支持时自动使用实际稳定分辨率(1280x720)。
 
-## 6. Excel 配置
+## 6. 坐标配置表(§10)
 
-`data/pcb_config.xlsx`(Sheet: Components)由程序自动创建,也可手工编辑。
-字段: Ref / Type / X / Y / Width / Height / Angle / Inspect / OCR / ExpectedValue /
-Mask / Algorithm / PositionTolerance / SizeTolerance / AngleTolerance / RoiExpand。
-X/Y/Width/Height 单位为 mm(板左上角原点),Angle 为度。
+`data/pcb_config.xlsx`(Sheet: Components)由程序自动创建,也可手工编辑;
+加载器同时支持 **.xlsx / .xls / .csv**。
+
+**基础字段(必需,16 个)**: Ref / Type / X / Y / Width / Height / Angle / Inspect /
+OCR / ExpectedValue / Mask / Algorithm / PositionTolerance / SizeTolerance /
+AngleTolerance / RoiExpand。X/Y/Width/Height 单位 mm(板左上角原点),Angle 为度。
+
+**扩展字段(可选,13 个)**: PartNumber / X_Offset / Y_Offset / TeachX / TeachY /
+TeachAngle / CoordinateSystem / CoordinateMeaningConfirmed / BoardID /
+SourceFile / SourceSheet / SourceRow / Notes。
+原始坐标字段(偏移/示教值)与确认后的绝对坐标(X/Y)分开保存;缺失的示教值保留空,
+程序不会猜测补齐。
+
+**坐标语义门控(§10.2,不可违反)**: 绝不因字段名叫 X/Y 就默认是绝对 PCB 坐标。
+`CoordinateMeaningConfirmed` 仅 YES/Y/TRUE/1/confirmed/是 视为已确认;
+其余(含空值)一律未确认 → 该元件 ROI 标 **UNCONFIGURED**,不参与最终定位,
+整板判定升级为 **REVIEW**。旧格式文件(无语义列)回退全局配置
+`coordinate.coordinate_meaning_confirmed` 并在元件 notes 中记录该回退。
+客户列名不同(如 RefDes/PosX)时用 `config.yaml` 的
+`coordinate_import.field_mapping` 映射,不改程序。
 
 ## 7. Mark 配置
 
@@ -57,12 +73,42 @@ python main.py --create-golden                    # 摄像头 -> 自动 Mark -> 
 python main.py --create-golden --source a.jpg     # 离线图片创建
 ```
 
-保存到 `data/golden/<PCB_NAME>/golden.png` + `metadata.json`
-(pcb_name/分辨率/camera_index/timestamp/mark_points)。自动 Mark 失败时支持手动 Mark 点。
+保存到 `data/golden/<PCB_NAME>/golden.png` + `metadata.json`(§14 可追溯元数据:
+pcb_name/分辨率/camera_index/timestamp/mark_points/creation_method +
+**calibration 快照**(参数文件/RMS/是否 identity)/undistort_status/
+coordinate_file/coordinate_meaning_confirmed/transform_version/
+roi_config_version/panel_config)。
+检测时引擎比对 Golden 元数据与当前标定/变换版本,不一致判 REVIEW,
+绝不静默差分。自动 Mark 失败时支持手动 Mark 点。
+
+## 8.1 相机标定与畸变校正(§8)
+
+`src/calibration/calibration.py`: 棋盘格角点 → calibrateCamera →
+参数存 `data/calibration/camera_calibration.json`(含 RMS/每样本残差/分辨率/时间戳)。
+检测流水线第 0 级校验参数并做畸变校正(undistort),产物含 `undistorted.jpg`。
+合成演示使用文档化的 **identity 豁免**(合成图按构造无畸变);
+豁免仅对 `source="synthetic"` 放行,真实相机/上传来源持 identity 参数一律 REVIEW。
+
+## 8.2 判定等级与门控(§18)
+
+判定优先级 **REVIEW > NG > PASS**,全部结果为 MVP 候选
+(result.json 中 `result_grade=MVP_CANDIDATE`)。以下任一成立即 REVIEW
+(琥珀色显示,附 review_reasons): 无有效相机标定 / 坐标语义未确认 /
+Golden 与当前条件不一致 / 存在 UNCONFIGURED ROI / 缺陷落在待复核 ROI。
+GUI 与 Web 端均显示标定与坐标映射状态。
+
+## 8.3 拼板(§9.1)
+
+`config.yaml` `panel` 段: `mode: single/grid/auto`,grid 模式按
+rows/cols/spacing/rotation 生成 BOARD_1..N(row_major 编号);
+缺陷记录自动归属单板编号(board_id);`roi_overlay.jpg` 叠加拼板边界。
+auto 模式为验证钩子,轮廓数 ≤1 时退化 single 并警告。
 
 ## 9. 检测流程
 
-GUI: 打开摄像头(Live) → 拍照 → 开始检测(Inspection) → 右视图 overlay + 异常表 + PASS/NG。
+GUI: 打开摄像头(Live) → 拍照 → 开始检测(Inspection) → 右视图产物切换
+(overlay/roi_overlay/masks_color/diff 等) + 异常表(Ref/BoardID/Defect/.../Message)
++ 判定(PASS 绿/NG 红/REVIEW 琥珀)。
 CLI: `python main.py --synthetic-test` 演示完整流程。
 
 ## 10. 参数调整
@@ -74,14 +120,19 @@ CLI: `python main.py --synthetic-test` 演示完整流程。
 
 ## 11. 输出文件
 
-每次检测保存到 `output/<YYYYMMDD_HHMMSS>/`:
-`original.jpg`(原图) `aligned.jpg`(对齐图) `mask.png`(检测区掩膜)
-`diff.png`(差分图) `overlay.jpg`(绿=PASS ROI,红=NG 缺陷框) `result.json`(§二十结构)。
+每次检测保存到 `output/<YYYYMMDD_HHMMSS>/`(§19 共 12 件产物):
+`original.jpg`(原图) `undistorted.jpg`(畸变校正图) `aligned.jpg`(对齐图)
+`roi_overlay.jpg`(拼板边界+ROI 状态着色) `pcb_mask.png` `component_mask.png`
+`valid_inspection_mask.png`(三掩膜,255=区域为真) `masks_color.png`
+(彩色可视化: 绿=检测区/红=元件/灰=板外) `diff.png`(差分图)
+`overlay.jpg`(判定叠加图) `result.json` `config_snapshot.yaml`
+(配置+H 矩阵+留出重投影误差+拼板 placements+ROI 摘要快照)。
 
 ## 12. 错误处理
 
 结构化异常(`src/utils/exceptions.py`): CameraError / AlignmentError /
-MarkDetectionError / ExcelConfigError / ROIError / GoldenImageError / InspectionError。
+MarkDetectionError / CalibrationError / CoordinateConfigError(ExcelConfigError
+为其子类) / ROIError / GoldenImageError / InspectionError。
 全部记录到 `logs/aoi.log`,检测失败返回 ERROR 结果而不崩溃。
 
 ## 13. Synthetic Test
@@ -129,19 +180,31 @@ Debian 库: `libgl1` / `libglib2.0-0`),`requirements.txt` 已含 `streamlit>=1.3
 streamlit run streamlit_app.py
 ```
 
-Web 端功能: 合成演示(零硬件一键跑通 PASS/NG/NG)、浏览器摄像头 / 上传图片检测、
-Golden 管理(查看/上传良品板重建)、元件坐标表查看/下载/校验替换。
+Web 端功能: 合成演示(零硬件一键跑通 PASS/NG/NG)、浏览器摄像头 / 上传图片检测
+(真实来源在 identity 标定下判 REVIEW 并列出原因,§27.5)、判定门控状态侧边栏、
+产物切换查看(overlay/roi_overlay/masks_color 等)、Golden 管理(查看/上传良品板重建)、
+元件坐标表查看/下载/校验替换(.xlsx/.xls/.csv)。
 注意: 云端摄像头走浏览器 `st.camera_input`(HTTPS 下可用),
 不使用 `cv2.VideoCapture`;文件系统为临时存储,重启后 output/ 清空。
 
 ---
 
-## 测试与验收状态(本机实测)
+## 测试与验收状态(本机实测,五级验证 §23)
 
-- `python main.py --test`: **33 passed**
-- `python main.py --synthetic-test`: 3/3 场景符合(PASS/NG/NG),六件产物齐全
-- `python main.py --camera-test`: 真实摄像头打开/拍照/释放通过(1280x720)
-- 开发日志: `docs/DEV_LOG.md`(Phase 0-15 全记录)
+| 级别 | 内容 | 状态 |
+|---|---|---|
+| 1. 单元测试 | `python main.py --test` | ✅ **87 passed**(标定/坐标回环/留出重投影/拼板/ROI/Mask/差分/判定门控/坐标导入语义) |
+| 2. 合成图像测试 | `python main.py --synthetic-test` | ✅ 3/3 场景符合: capture_ok=PASS,capture_ng=NG(3 缺陷),capture_shifted=NG(3 缺陷,验证 Homography 对齐恢复);12 件产物齐全 |
+| 3. GUI 离屏冒烟 | `QT_QPA_PLATFORM=offscreen python tools/gui_smoke_test.py` | ✅ NG 检出 + REVIEW 门控(identity 标定对相机来源不放行)双场景通过 |
+| 4. 真实摄像头链路 | `python main.py --camera-test` | ✅ 打开/取流/释放通过(1280x720);⚠️ 真实 PCB 标定 **PENDING**(缺实体标定板) |
+| 5. 真实样本验证 | 真实 PCB 图片 + 客户坐标报告 | ⛔ **BLOCKED**: `Abus-913-13339001-00C-TOP.jpg` 与 `Report_913-13339001-00C-A.xls` 未提供,按 §27.9 不依赖它们的模块已完成,相关集成点留 PENDING 标记 |
 
-**限制**: 核心算法已通过 Synthetic Test,但真实 PCB 检测仍需要真实 PCB 图像/坐标/Mark 数据
-进行现场参数标定。本 MVP 不声称达到工业 AOI 精度。
+**判定门控说明(§18/§27.5)**: 合成测试的绿色判定依赖文档化的 identity 标定豁免
+(合成图按构造无镜头畸变);同一组参数对 camera/upload 来源不放行(强制 REVIEW)。
+坐标语义未确认、Golden 条件不一致、UNCONFIGURED ROI 存在时同样强制 REVIEW。
+
+**限制**: 核心算法已通过 Synthetic Test,但真实 PCB 检测仍需要实体标定板标定、
+真实 PCB 图像/坐标/Mark 数据进行现场确认。本 MVP 不声称达到工业 AOI 精度,
+所有结果均为 MVP 候选(result_grade=MVP_CANDIDATE)。
+
+开发日志: `docs/DEV_LOG.md`(Phase 0-15 + 融合版包 A/B/C/D 全记录)

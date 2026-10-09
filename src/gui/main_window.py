@@ -15,9 +15,10 @@ import cv2
 import numpy as np
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QMainWindow,
-                               QPushButton, QSpinBox, QTableWidget,
-                               QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QHeaderView, QLabel,
+                               QMainWindow, QPushButton, QSpinBox,
+                               QTableWidget, QTableWidgetItem, QVBoxLayout,
+                               QWidget)
 
 from src.camera.camera import Camera
 from src.camera.camera_manager import create_camera_from_config
@@ -53,6 +54,9 @@ class MainWindow(QMainWindow):
         self.camera_index = (camera_index if camera_index is not None
                              else int(cfg.get("camera.index", 0)))
         self.last_frame: np.ndarray | None = None
+        # 当前帧来源(§27.5 判定门控依赖): 摄像头取帧为 camera;
+        # 测试注入合成帧时由调用方置 "synthetic"(identity 豁免仅合成可用)
+        self.frame_source: str = "camera"
         self.last_result: InspectionResult | None = None
 
         self.setWindowTitle("PCBA AOI MVP")
@@ -78,6 +82,10 @@ class MainWindow(QMainWindow):
         top.addWidget(self.cam_spin)
         self.status_label = QLabel("系统状态: 就绪")
         top.addWidget(self.status_label)
+        # 标定/坐标映射状态(§8/§10.2: REVIEW 门控来源,必须可见)
+        self.calib_label = QLabel("标定: -  坐标映射: -")
+        self.calib_label.setStyleSheet("color:#888;")
+        top.addWidget(self.calib_label)
         top.addStretch(1)
         root.addLayout(top)
 
@@ -95,13 +103,25 @@ class MainWindow(QMainWindow):
         mid.addWidget(self.result_view)
         root.addLayout(mid)
 
-        # 结果: PASS/NG + 异常列表
+        # 结果: 判定(PASS 绿/NG 红/REVIEW 琥珀, §18) + 产物切换 + 异常列表
+        result_row = QHBoxLayout()
         self.result_label = QLabel("结果: -")
         self.result_label.setStyleSheet("font-size:20px;font-weight:bold;")
-        root.addWidget(self.result_label)
-        self.defect_table = QTableWidget(0, 6)
+        result_row.addWidget(self.result_label)
+        result_row.addWidget(QLabel("产物:"))
+        self.artifact_combo = QComboBox()
+        # §19 产物清单(切换查看 result_view)
+        for name in ["overlay.jpg", "aligned.jpg", "undistorted.jpg",
+                     "roi_overlay.jpg", "masks_color.png", "diff.png",
+                     "original.jpg"]:
+            self.artifact_combo.addItem(name)
+        self.artifact_combo.currentTextChanged.connect(self._on_artifact_changed)
+        result_row.addWidget(self.artifact_combo)
+        result_row.addStretch(1)
+        root.addLayout(result_row)
+        self.defect_table = QTableWidget(0, 8)
         self.defect_table.setHorizontalHeaderLabels(
-            ["Ref", "Defect", "X", "Y", "Area", "Score"])
+            ["Ref", "BoardID", "Defect", "X", "Y", "Area", "Score", "Message"])
         self.defect_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch)
         self.defect_table.setMaximumHeight(160)
@@ -146,6 +166,7 @@ class MainWindow(QMainWindow):
             return
         if frame is not None:
             self.last_frame = frame
+            self.frame_source = "camera"
             self.camera_view.setPixmap(cv_to_pixmap(frame))
 
     def _stop_live(self) -> None:
@@ -179,28 +200,58 @@ class MainWindow(QMainWindow):
             self._set_status("无图像(请先打开摄像头)")
             return
         self._set_status("检测中...")
-        result = self.engine.inspect(self.last_frame, save_output=True)
+        result = self.engine.inspect(self.last_frame, save_output=True,
+                                     source=self.frame_source)
         self.last_result = result
         self._show_result(result)
 
+    # 判定颜色(§18/§19): PASS 绿 / NG 红 / REVIEW 琥珀 / ERROR 灰
+    _STATUS_COLORS = {"PASS": "#0a0", "NG": "#d22",
+                      "REVIEW": "#e6a800", "ERROR": "#888"}
+
     def _show_result(self, result: InspectionResult) -> None:
-        color = "#0a0" if result.overall_status == "PASS" else "#d22"
-        self.result_label.setText(f"结果: {result.overall_status}")
+        color = self._STATUS_COLORS.get(result.overall_status, "#888")
+        text = f"结果: {result.overall_status}"
+        if result.overall_status == "REVIEW" and result.review_reasons:
+            text += f"({len(result.review_reasons)} 项待复核)"
+        self.result_label.setText(text)
         self.result_label.setStyleSheet(
             f"font-size:20px;font-weight:bold;color:{color};")
+        self.calib_label.setText(
+            f"标定: {result.calibration_status}  "
+            f"坐标映射: {result.coordinate_mapping_status}")
+        self.calib_label.setStyleSheet(
+            "color:#888;" if result.calibration_status == "valid"
+            else "color:#e6a800;")
         self.defect_table.setRowCount(len(result.defects))
         for i, d in enumerate(result.defects):
-            for j, v in enumerate([d.ref or "-", d.type, d.x, d.y,
-                                   f"{d.area:.0f}", f"{d.score:.2f}"]):
+            for j, v in enumerate([d.ref or "-", d.board_id, d.type,
+                                   d.x, d.y, f"{d.area:.0f}",
+                                   f"{d.score:.2f}", d.message]):
                 self.defect_table.setItem(i, j, QTableWidgetItem(str(v)))
-        if result.output_dir:
-            overlay = Path(result.output_dir) / "overlay.jpg"
-            if overlay.exists():
-                img = cv2.imdecode(np.fromfile(str(overlay), np.uint8),
-                                   cv2.IMREAD_COLOR)
-                self.result_view.setPixmap(cv_to_pixmap(img))
+        # 默认显示 overlay;可通过产物下拉切换
+        self.artifact_combo.setCurrentText("overlay.jpg")
+        self._show_artifact("overlay.jpg")
         self._set_status(f"检测完成: {result.overall_status} "
                          f"({result.solder_defect_count} 个疑似缺陷) {result.message}")
+
+    def _on_artifact_changed(self, name: str) -> None:
+        self._show_artifact(name)
+
+    def _show_artifact(self, name: str) -> None:
+        """从本次输出目录加载所选产物到 Inspection Image 区 (§19)。"""
+        if not (self.last_result and self.last_result.output_dir):
+            return
+        path = Path(self.last_result.output_dir) / name
+        if not path.exists():
+            return
+        img = cv2.imdecode(np.fromfile(str(path), np.uint8),
+                           cv2.IMREAD_UNCHANGED)
+        if img is None:
+            return
+        if img.ndim == 2:  # 单通道 mask/diff 转灰度显示
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        self.result_view.setPixmap(cv_to_pixmap(img))
 
     def on_save_result(self) -> None:
         """结果在检测时已自动保存;此按钮提示保存位置。"""
