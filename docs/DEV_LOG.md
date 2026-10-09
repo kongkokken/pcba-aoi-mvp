@@ -411,3 +411,38 @@ ROI/Mask/Difference 可生成、异常可标记、JSON 可输出。
 3. 双重插值使合成样本 RMS≈1.9px → 测试阈值放宽至 3.0 并注明这是链路验证非度量学
 
 **下一阶段:** 包 B — 拼板分割 + 坐标空间 + ROI 升级 + Mask 三输出。
+
+---
+
+## PACKAGE B COMPLETE — 融合版 §9.1 拼板 + §11.1 留出评估 + §12 ROI 状态 + §13 Mask 三输出
+
+**新增/修改文件:**
+- 新增 `src/panel/panel_segmenter.py`: PanelSegmenter(single/grid/auto 模式判定、
+  row_major 编号 BOARD_1..N、BoardPlacement 单板↔拼板坐标变换(旋转+平移)、
+  board_id_for_panel_point/image_point 缺陷归属、auto 轮廓检测钩子(<=1 个退化 single 并警告)、
+  draw_boards 可视化);`src/panel/__init__.py`
+- `src/pcb/alignment.py`: +leave_one_out_error(§11.1 独立点重投影评估 —— 留出一点拟合仿射、
+  投影该点取误差,暴露拟合内残差会掩盖的异常 Mark)
+- `src/roi/roi.py`: Roi +board_id/status(OK/REVIEW/UNCONFIGURED)/message;
+  draw 按状态着色 + 中心十字 + `ref[board_id]` 标签
+- `src/roi/roi_manager.py`: ROI_CONFIG_VERSION="1.1";语义门控(全局或元件级坐标未确认
+  → UNCONFIGURED);reject_out_of_bounds=false 时裁剪+REVIEW;_check_overlaps
+  (cv2.intersectConvexConvex,超 overlap_warn_percent 双方 REVIEW);last_summary 质量摘要
+- `src/mask/component_mask.py`: 极性校验(仅支持 255,不一致拒绝静默继续);
+  detection_mask 空掩膜 ValueError(§13);visualize_color(绿=检测区/红=元件/灰=板外)
+- `src/inspection/inspection_engine.py`: 集成 PanelSegmenter;缺陷 board_id 由拼板坐标空间判定、
+  ref 关联包含它的 ROI;ROI 门控(UNCONFIGURED>0 → REVIEW;缺陷落入 REVIEW ROI → REVIEW);
+  产物 +masks_color.png(12 件);roi_overlay 叠加拼板边界;config_snapshot +mapping
+  (H 矩阵/留出误差/MAPPING_VERSION) +panel placements +roi_summary
+- 新增 `tests/test_panel.py`(9 项)、`tests/test_mask.py`(8 项)、`tests/test_alignment.py`(4 项,
+  含异常 Mark 必须被留出误差暴露的用例)
+
+**运行命令:** `python -m pytest tests/ -q` → **73 passed**;`python main.py --test` → 73 passed;
+`python main.py --synthetic-test` → PASS/NG/NG 保持绿色(缺陷归属 BOARD_1,ref 关联为空属正常
+—— 缺陷点在元件屏蔽区外的开阔检测区)
+
+**发现的问题:**
+1. cv2.estimateAffine2D 为 float32 计算,纯仿射留出误差 ~8.5e-6px → 测试容差 1e-3 并注明
+2. engine 缺陷 board_id 原硬编码 "BOARD_1" → 改为 panel.board_id_for_image_point 按坐标空间判定
+
+**下一阶段:** 包 C — 坐标导入语义(.xls/.xlsx/.csv + 字段映射 + 模板扩展 + 未确认阻断)。

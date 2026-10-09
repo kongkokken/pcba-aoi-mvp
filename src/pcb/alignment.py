@@ -17,6 +17,39 @@ from src.utils.logger import get_logger
 logger = get_logger("alignment")
 
 
+def leave_one_out_error(detected_marks: np.ndarray,
+                        canonical_marks: np.ndarray
+                        ) -> tuple[float, float]:
+    """独立点重投影评估 (融合版 §11.1)。
+
+    每次留出一个 Mark 点,用其余点拟合仿射变换,投影被留出的点并测量
+    像素误差 —— 该点未参与拟合,误差独立可信(区别于拟合内残差)。
+    返回 (max_error_px, mean_error_px);点数 <4 时无独立点可评估,
+    返回 (0.0, 0.0) 并记录警告。
+    """
+    src = np.asarray(detected_marks, dtype=np.float64)
+    dst = np.asarray(canonical_marks, dtype=np.float64)
+    if src.ndim != 2 or src.shape[1] != 2 or len(src) != len(dst):
+        raise AlignmentError(
+            f"留出评估输入非法: detected{src.shape} vs canonical{dst.shape}")
+    if len(src) < 4:
+        logger.warning("Mark 点 %d < 4,无法做留出重投影评估", len(src))
+        return 0.0, 0.0
+    errs: list[float] = []
+    for i in range(len(src)):
+        idx = [j for j in range(len(src)) if j != i]
+        M, _ = cv2.estimateAffine2D(src[idx].astype(np.float32),
+                                    dst[idx].astype(np.float32))
+        if M is None:
+            raise AlignmentError(f"留出评估: 去掉第 {i} 点后仿射拟合失败(点退化)")
+        proj = cv2.transform(src[i].reshape(1, 1, 2).astype(np.float32),
+                             M).reshape(2)
+        errs.append(float(np.linalg.norm(proj - dst[i])))
+    logger.info("留出重投影误差: max=%.2fpx mean=%.2fpx (%d 点)",
+                max(errs), sum(errs) / len(errs), len(errs))
+    return max(errs), sum(errs) / len(errs)
+
+
 class Aligner:
     """由 Mark 像素坐标计算变换并把拍摄图对齐到标准坐标图。"""
 

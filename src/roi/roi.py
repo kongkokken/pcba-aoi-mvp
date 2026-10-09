@@ -15,7 +15,11 @@ from src.utils.exceptions import ROIError
 
 @dataclass
 class Roi:
-    """对齐图像中的一个旋转矩形 ROI。"""
+    """对齐图像中的一个旋转矩形 ROI (融合版 §12)。
+
+    status: OK=可用于最终定位; REVIEW=需人工复核(越界裁剪/重叠/全局未确认);
+    UNCONFIGURED=坐标语义未确认,不得用于最终 ROI 定位 (§10.2/§12.9)。
+    """
     ref: str
     cx: float          # 中心 x (px)
     cy: float
@@ -26,6 +30,9 @@ class Roi:
     mask: bool = True
     algorithm: str = "Geometry"
     expected_value: str = ""
+    board_id: str = "BOARD_1"
+    status: str = "OK"
+    message: str = ""
     points: np.ndarray = field(default=None, repr=False)  # boxPoints 缓存
 
     def __post_init__(self) -> None:
@@ -51,11 +58,19 @@ class Roi:
         return cv2.pointPolygonTest(self.points.astype(np.float32),
                                     (float(x), float(y)), False) >= 0
 
-    def draw(self, image: np.ndarray, color: tuple[int, int, int] = (0, 255, 0),
+    def draw(self, image: np.ndarray, color: tuple[int, int, int] | None = None,
              label: bool = True) -> np.ndarray:
+        """绘制 ROI;默认按状态着色(绿=OK 黄=REVIEW 灰=UNCONFIGURED)。"""
+        if color is None:
+            color = {"OK": (0, 255, 0), "REVIEW": (0, 220, 230)}.get(
+                self.status, (150, 150, 150))
         cv2.polylines(image, [self.points.astype(np.int32)], True, color, 1)
+        # 元件中心十字 (§12.7 预览需显示中心)
+        cv2.drawMarker(image, (int(self.cx), int(self.cy)), color,
+                       cv2.MARKER_CROSS, 8, 1)
         if label:
             x, y, _, _ = self.bounding_rect
-            cv2.putText(image, self.ref, (x, max(10, y - 4)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+            cv2.putText(image, f"{self.ref}[{self.board_id}]",
+                        (x, max(10, y - 4)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
         return image

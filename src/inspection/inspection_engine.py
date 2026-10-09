@@ -31,7 +31,8 @@ from src.difference.image_difference import ImageDifferenceDetector
 from src.golden.golden_manager import GoldenManager
 from src.inspection.inspection_result import (DefectRecord, InspectionResult)
 from src.mask.component_mask import ComponentMaskGenerator
-from src.pcb.alignment import Aligner
+from src.panel.panel_segmenter import PanelSegmenter
+from src.pcb.alignment import Aligner, leave_one_out_error
 from src.pcb.mark_detector import MarkDetector
 from src.pcb.pcb_locator import PcbLocator
 from src.roi.roi_manager import ROI_CONFIG_VERSION, RoiManager
@@ -60,7 +61,10 @@ class InspectionEngine:
         self.golden_mgr = GoldenManager(cfg)
         self.diff_detector = ImageDifferenceDetector(cfg)
         self.solder_detector = SolderDefectDetector(cfg)
+        self.panel = PanelSegmenter(cfg)
         self.last_output_dir: Path | None = None
+        self.last_roi_summary: dict = {}
+        self.last_reproj_loo: tuple[float, float] = (0.0, 0.0)
 
     # ---- 标定检查 (§8/§18) ---------------------------------------------
     def _check_calibration(self, image_size: tuple[int, int],
@@ -120,6 +124,9 @@ class InspectionEngine:
         # 1. Mark 定位 + 对齐
         marks = self.mark_detector.detect(undistorted)
         H = self.aligner.compute_transform(marks)
+        # 独立点重投影评估(§11.1): 留一点拟合、投影该点,误差独立可信
+        self.last_reproj_loo = leave_one_out_error(
+            marks, self.aligner.canonical_marks[:len(marks)])
         aligned = self.aligner.align_with_matrix(undistorted, H)
         result.alignment_status = "OK"
 
@@ -134,6 +141,7 @@ class InspectionEngine:
         components = self.excel.load_components()
         roi_mgr = RoiManager(self.cfg, transform)
         rois = roi_mgr.create_rois(components)
+        self.last_roi_summary = roi_mgr.last_summary
         w, h = self.aligner.aligned_size
         mask_gen = ComponentMaskGenerator(w, h)
         component_mask = mask_gen.generate(rois)
@@ -163,15 +171,18 @@ class InspectionEngine:
         result.components_pass = len(inspected)
         result.components_ng = 0
         result.solder_defect_count = len(defects)
-        result.defects = [
-            DefectRecord(
-                type=d.type, ref="", board_id="BOARD_1",
+        # 缺陷归属: 单板编号由拼板坐标空间判定(§9.1),关联包含它的 ROI
+        defect_records: list[DefectRecord] = []
+        for d in defects:
+            board_id = self.panel.board_id_for_image_point(d.x, d.y)
+            ref = next((r.ref for r in rois if r.contains(d.x, d.y)), "")
+            defect_records.append(DefectRecord(
+                type=d.type, ref=ref, board_id=board_id,
                 x=d.x, y=d.y, width=d.width, height=d.height,
                 area=d.area, score=d.score,
                 message=f"疑似{'锡珠' if 'ball' in d.type else '锡渣'} "
-                        f"@({d.x},{d.y})px 圆度={d.circularity}(候选排序分,非概率)")
-            for d in defects
-        ]
+                        f"@({d.x},{d.y})px 圆度={d.circularity}(候选排序分,非概率)"))
+        result.defects = defect_records
         result.config_versions = {
             "config_file": self.cfg.config_path.name,
             "mapping_version": MAPPING_VERSION,
@@ -190,6 +201,23 @@ class InspectionEngine:
             review.append("坐标语义未确认(CoordMeaningConfirmed=NO)")
         if condition_mismatch:
             review.append("Golden 与当前标定/变换条件不一致,应重建 Golden")
+        # ROI 状态门控(§12/§18): UNCONFIGURED 元件无法验证 -> REVIEW;
+        # REVIEW 状态 ROI 内发现缺陷 -> 该缺陷需人工复核 -> REVIEW
+        roi_summary = self.last_roi_summary
+        if roi_summary.get("unconfigured", 0) > 0:
+            review.append(
+                f"{roi_summary['unconfigured']} 个 ROI 坐标语义未确认"
+                "(UNCONFIGURED),对应元件本次未验证")
+        review_rois = [r for r in rois if r.status == "REVIEW"]
+        if review_rois:
+            hits = [d.ref for d in defect_records
+                    if d.ref and any(r.ref == d.ref for r in review_rois)]
+            if hits:
+                review.append(
+                    f"缺陷落在待复核 ROI({','.join(sorted(set(hits)))}),需人工确认")
+            else:
+                logger.info("ROI REVIEW 状态(无缺陷落入): %s",
+                            [r.ref for r in review_rois])
         result.review_reasons = review
         if review:
             result.overall_status = str(
@@ -205,7 +233,11 @@ class InspectionEngine:
             result.output_dir = str(out_dir)
             overlay = self._draw_overlay(aligned, rois, defects,
                                          result.overall_status)
-            roi_overlay = roi_mgr.draw_all(aligned, rois)
+            # roi_overlay: 拼板边界 + 编号打底,ROI 按状态着色叠加 (§9.1/§12)
+            roi_overlay = roi_mgr.draw_all(self.panel.draw_boards(aligned),
+                                           rois)
+            masks_color = ComponentMaskGenerator.visualize_color(
+                pcb_mask, component_mask, valid_mask)
             save_image(capture_image, out_dir / "original.jpg")
             save_image(undistorted, out_dir / "undistorted.jpg")
             save_image(aligned, out_dir / "aligned.jpg")
@@ -213,9 +245,10 @@ class InspectionEngine:
             save_image(pcb_mask, out_dir / "pcb_mask.png")
             save_image(component_mask, out_dir / "component_mask.png")
             save_image(valid_mask, out_dir / "valid_inspection_mask.png")
+            save_image(masks_color, out_dir / "masks_color.png")
             save_image(diff.diff_image, out_dir / "diff.png")
             save_image(overlay, out_dir / "overlay.jpg")
-            self._save_config_snapshot(out_dir, result)
+            self._save_config_snapshot(out_dir, result, H)
             result.to_json(out_dir / "result.json")
             logger.info("Inspection finished: %s, defects=%d, output=%s",
                         result.overall_status, len(defects), out_dir)
@@ -237,13 +270,32 @@ class InspectionEngine:
         return out
 
     def _save_config_snapshot(self, out_dir: Path,
-                              result: InspectionResult) -> None:
-        """本次检测的配置/参数快照(§19 可追溯)。"""
+                              result: InspectionResult,
+                              H: np.ndarray | None = None) -> None:
+        """本次检测的配置/参数快照(§19 可追溯),含坐标映射与拼板信息。"""
         snapshot = {"config": self.cfg.as_dict(),
                     "versions": result.config_versions,
                     "calibration_status": result.calibration_status,
                     "coordinate_mapping_status":
-                        result.coordinate_mapping_status}
+                        result.coordinate_mapping_status,
+                    "mapping": {
+                        "mapping_version": MAPPING_VERSION,
+                        "homography": H.tolist() if H is not None else None,
+                        "reproj_loo_max_px": round(self.last_reproj_loo[0], 3),
+                        "reproj_loo_mean_px": round(self.last_reproj_loo[1], 3),
+                    },
+                    "panel": {
+                        "mode": self.panel.mode,
+                        "placements": [
+                            {"board_id": p.board_id,
+                             "origin_x_mm": p.origin_x_mm,
+                             "origin_y_mm": p.origin_y_mm,
+                             "rotation_deg": p.rotation_deg,
+                             "width_mm": p.width_mm,
+                             "height_mm": p.height_mm}
+                            for p in self.panel.placements()],
+                    },
+                    "roi_summary": self.last_roi_summary}
         (out_dir / "config_snapshot.yaml").write_text(
             yaml.safe_dump(snapshot, allow_unicode=True, sort_keys=False),
             encoding="utf-8")

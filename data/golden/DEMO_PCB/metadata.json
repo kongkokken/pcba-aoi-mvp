@@ -3,7 +3,7 @@
   "image_width": 800,
   "image_height": 560,
   "camera_index": 0,
-  "timestamp": "2026-10-09T14:03:24",
+  "timestamp": "2026-10-09T14:21:10",
   "calibration": {
     "present": true,
     "valid": true,
@@ -17,7 +17,7 @@
   "coordinate_file": "pcb_config.xlsx",
   "coordinate_meaning_confirmed": true,
   "transform_version": "1.0",
-  "roi_config_version": "1.0",
+  "roi_config_version": "1.1",
   "panel_config": {
     "mode": "single",
     "rows": 1,
