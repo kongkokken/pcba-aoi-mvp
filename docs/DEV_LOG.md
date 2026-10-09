@@ -446,3 +446,42 @@ ROI/Mask/Difference 可生成、异常可标记、JSON 可输出。
 2. engine 缺陷 board_id 原硬编码 "BOARD_1" → 改为 panel.board_id_for_image_point 按坐标空间判定
 
 **下一阶段:** 包 C — 坐标导入语义(.xls/.xlsx/.csv + 字段映射 + 模板扩展 + 未确认阻断)。
+
+---
+
+## PACKAGE C COMPLETE — 融合版 §10 坐标文件解析与语义确认
+
+**新增/修改文件:**
+- `src/coordinate/excel_manager.py` 重写:
+  - 多格式读取(§10.1): .xlsx/.xlsm(openpyxl)、.xls(xlrd)、.csv(utf-8-sig/gbk 回退);
+    工作表名可配(coordinate_import.sheet_name),缺失回退第一个工作表并警告
+  - 字段映射(§10.1): coordinate_import.field_mapping canonical<-源列名,不硬编码客户格式
+  - 可追溯性: Component +source_file/source_sheet/source_row/raw(原始字段值)
+  - 扩展字段(§10.3): PartNumber/X_Offset/Y_Offset/TeachX/TeachY/TeachAngle/
+    CoordinateSystem/CoordinateMeaningConfirmed/BoardID/Notes;示教值缺失保留 None(不猜测补齐)
+  - 校验清单: 重复位号(列出具体 ref)/空坐标(NaN 显式检查,float(NaN) 不抛异常!)/非法数值/
+    异常角度(|angle|>360)/字段缺失(报错提示 field_mapping)
+  - 语义门控(§10.2): CoordinateMeaningConfirmed 仅 YES/Y/TRUE/1/confirmed/是 算确认,
+    其余一律未确认并在 notes 列待确认问题;语义列缺失的旧文件回退全局
+    coordinate_meaning_confirmed 并在 notes 记录回退(可追溯)
+  - 模板升级: 基础 16 字段 + 扩展 13 字段;合成模板行 CoordinateMeaningConfirmed=YES
+    (自建几何,语义由生成器定义,诚实);data/pcb_config.xlsx 已迁移至新格式
+- `config.yaml`: +coordinate_import 组(sheet_name/field_mapping)
+- `requirements.txt`: +xlrd>=2.0(.xls 读取)
+- 新增 `tests/test_coordinate_import.py`(13 项): 模板字段/多格式(xlsx/csv/xls)/字段映射/
+  重复位号/空坐标/异常角度/示教值保留/未确认标记+阻断 ROI(UNCONFIGURED)/旧格式回退
+- 新增 `tests/fixtures/components_legacy.xls`(xlwt 一次性生成的旧版格式夹具,xlwt 仅为
+  夹具生成工具,非运行时依赖)
+
+**运行命令:** `python -m pytest tests/ -q` → **87 passed**;`python main.py --synthetic-test` →
+PASS/NG/NG 保持绿色
+
+**发现的问题:**
+1. `float(np.nan)` 不抛异常 → 空坐标检查必须用 np.isfinite 显式拦截(否则会带着 NaN 进 ROI)
+2. RoiManager.last_summary 只在批量 create_rois 生成 → 语义门控测试改用批量接口
+3. pandas 无法写 .xls(xlwt 未装)→ xlwt 装为开发工具一次性生成夹具并提交,运行时不依赖
+
+**剩余缺口(§27.9 PENDING):** 真实坐标报告 Report_913-13339001-00C-A.xls 不存在,
+真实客户列名/字段映射/语义确认未经真实文件验证。
+
+**下一阶段:** 包 D — Golden 元数据核对 + GUI/streamlit REVIEW 展示 + 五级测试文档。

@@ -57,6 +57,12 @@ coordinate:
   coordinate_meaning_confirmed: true
   default_roundtrip_tolerance_mm: 0.1   # 初始软件测试目标,非产线保证值 (§11.1)
 
+coordinate_import:            # §10.1 坐标文件读取
+  sheet_name: Components      # 工作表名;不存在时回退第一个工作表并警告
+  # 字段映射 canonical <- 客户源列名(默认恒等,避免硬编码客户格式);
+  # 例: {Ref: RefDes, X: PosX, Angle: Rotation}
+  field_mapping: {}
+
 decision:
   uncertain_status: REVIEW      # 不确定时的判定 (§18)
   require_valid_calibration: true           # 无有效标定(或文档化豁免)时不得 PASS
